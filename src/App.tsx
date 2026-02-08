@@ -16,7 +16,7 @@ import { ScrollToTop } from "@/components/ScrollToTop";
 import { BottomNavigation } from "@/components/BottomNavigation";
 import { AnimatedRoutes } from "@/components/AnimatedRoutes";
 import { SwipeNavigationWrapper } from "@/components/SwipeNavigationWrapper";
-import { CartQuickView } from "@/components/CartQuickView";
+// CartQuickView removed - users access cart via icon only
 import { ProductComparisonBar } from "@/components/ProductComparisonBar";
 import { ProductComparisonModal } from "@/components/ProductComparisonModal";
 import { AbandonedCartTracker } from "@/components/AbandonedCartTracker";
@@ -111,7 +111,7 @@ function AppContent() {
                     <ProductComparisonBar />
                     <ProductComparisonModal />
                     <BottomNavigation />
-                    <CartQuickView />
+                    {/* Cart accessed via icon only, no floating bar */}
                     <SwipeNavigationWrapper>
                     <AnimatedRoutes>
                       <Routes>
