@@ -1,21 +1,16 @@
 import { useLocation, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Home, ShoppingBag, Heart, User, Briefcase } from 'lucide-react';
+import { Home, Heart, User, Grid3X3, ShoppingBag } from 'lucide-react';
 import { useCartStore } from '@/lib/store';
 import { useWishlist } from '@/hooks/useWishlist';
 import { useAuth } from '@/lib/auth';
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from '@/components/ui/tooltip';
-// Account removed from bottom nav - it's in the header
+
 const navItems = [
   { icon: Home, label: 'Home', path: '/' },
-  { icon: ShoppingBag, label: 'Shop', path: '/shop' },
-  { icon: Briefcase, label: 'My Bag', path: 'cart' },
+  { icon: Grid3X3, label: 'Shop', path: '/shop' },
+  { icon: ShoppingBag, label: 'Bag', path: 'cart' },
   { icon: Heart, label: 'Wishlist', path: '/wishlist' },
+  { icon: User, label: 'Account', path: '/account' },
 ];
 
 export function BottomNavigation() {
@@ -48,15 +43,14 @@ export function BottomNavigation() {
   if (location.pathname.startsWith('/admin')) return null;
 
   return (
-    <TooltipProvider delayDuration={300}>
     <motion.nav
       initial={{ y: 100 }}
       animate={{ y: 0 }}
       transition={{ type: 'spring', stiffness: 300, damping: 30 }}
-      className="fixed bottom-0 left-0 right-0 z-50 md:hidden bg-background border-t border-border shadow-lg"
+      className="fixed bottom-0 left-0 right-0 z-50 md:hidden bg-background/95 backdrop-blur-md border-t border-border/50"
       style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
     >
-      <div className="flex items-center justify-around h-[60px] px-1 max-w-md mx-auto">
+      <div className="flex items-center justify-around h-[64px] px-2">
         {navItems.map((item) => {
           const active = isActive(item.path);
           const showBadge = 
@@ -64,33 +58,28 @@ export function BottomNavigation() {
             (item.path === '/wishlist' && wishlistCount > 0);
           const badgeCount = item.path === 'cart' ? cartCount : wishlistCount;
 
-          const isCart = item.path === 'cart';
-          const tooltipContent = isCart && cartCount > 0 
-            ? `${cartCount} item${cartCount > 1 ? 's' : ''} in bag`
-            : null;
-
-          const buttonContent = (
+          return (
             <button
               key={item.label}
               onClick={() => handleNavigation(item)}
-              className="relative flex flex-col items-center justify-center flex-1 h-full py-1.5 transition-all active:scale-95"
+              className="relative flex flex-col items-center justify-center flex-1 h-full py-1 transition-all active:scale-95"
             >
               <motion.div
-                className={`relative p-2.5 rounded-2xl transition-all duration-200 ${
+                className={`relative p-2 rounded-xl transition-all duration-200 ${
                   active 
-                    ? 'bg-primary/12 text-primary shadow-sm' 
-                    : 'text-muted-foreground hover:text-foreground'
+                    ? 'bg-primary/10 text-primary' 
+                    : 'text-muted-foreground'
                 }`}
                 whileTap={{ scale: 0.9 }}
               >
-                <item.icon className={`h-5 w-5 transition-all ${active ? 'stroke-[2.5px]' : 'stroke-[2px]'}`} />
+                <item.icon className={`h-5 w-5 transition-all ${active ? 'stroke-[2.5px]' : 'stroke-[1.5px]'}`} />
                 
-                {/* Badge with pulse animation */}
+                {/* Badge */}
                 {showBadge && (
                   <motion.span
                     initial={{ scale: 0 }}
                     animate={{ scale: 1 }}
-                    className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] flex items-center justify-center px-1 text-[10px] font-bold bg-primary text-primary-foreground rounded-full shadow-sm"
+                    className="absolute -top-1 -right-1 min-w-[16px] h-[16px] flex items-center justify-center px-1 text-[9px] font-bold bg-primary text-primary-foreground rounded-full"
                   >
                     {badgeCount > 99 ? '99+' : badgeCount}
                   </motion.span>
@@ -103,34 +92,18 @@ export function BottomNavigation() {
                 {item.label}
               </span>
 
-              {/* Active indicator pill */}
+              {/* Active indicator line */}
               {active && (
                 <motion.div
-                  layoutId="bottomNavIndicator"
-                  className="absolute -bottom-0.5 w-8 h-1 bg-gradient-to-r from-primary to-primary/70 rounded-full shadow-sm"
+                  layoutId="bottomNavActive"
+                  className="absolute top-0 left-1/2 -translate-x-1/2 w-6 h-0.5 bg-primary rounded-full"
                   transition={{ type: 'spring', stiffness: 500, damping: 30 }}
                 />
               )}
             </button>
           );
-
-          if (tooltipContent) {
-            return (
-              <Tooltip key={item.label}>
-                <TooltipTrigger asChild>
-                  {buttonContent}
-                </TooltipTrigger>
-                <TooltipContent side="top" className="bg-foreground text-background text-xs px-3 py-1.5 rounded-lg">
-                  {tooltipContent}
-                </TooltipContent>
-              </Tooltip>
-            );
-          }
-
-          return buttonContent;
         })}
       </div>
     </motion.nav>
-    </TooltipProvider>
   );
 }
