@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Search, ShoppingBag, User, Menu, X, LogOut, Settings, Package, Facebook, Instagram, ChevronDown, Heart } from 'lucide-react';
+import { Search, User, Menu, X, LogOut, Settings, Package, Heart } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -21,17 +21,19 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { useToast } from '@/hooks/use-toast';
-import { useCartStore } from '@/lib/store';
 import { useAuth } from '@/lib/auth';
-import { useSiteSettings } from '@/hooks/useSiteSettings';
 import { Logo } from './Logo';
 import { SearchBar } from './SearchBar';
 import { MobileMenuOverlay } from '@/components/MobileMenuOverlay';
 import { NotificationBell } from '@/components/NotificationBell';
-import { SettingsPanel } from '@/components/SettingsPanel';
 import { useLanguage } from '@/hooks/useLanguage';
 import { cn } from '@/lib/utils';
+import { useSiteSettings } from '@/hooks/useSiteSettings';
+import { Facebook, Instagram, ChevronDown, ShoppingBag } from 'lucide-react';
+import { useCartStore } from '@/lib/store';
+import { SettingsPanel } from '@/components/SettingsPanel';
 import { useWishlist } from '@/hooks/useWishlist';
+
 const navLinks = [
   { name: 'Home', key: 'home', href: '/' },
   { name: 'Shop', key: 'shop', href: '/shop' },
@@ -45,16 +47,16 @@ export function Header() {
   const [showSignOutDialog, setShowSignOutDialog] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isScrolled, setIsScrolled] = useState(false);
-  const { getTotalItems, openCart } = useCartStore();
   const { user, isAdmin, signOut } = useAuth();
-  const { settings } = useSiteSettings();
   const { toast } = useToast();
   const navigate = useNavigate();
   const location = useLocation();
+  const { t } = useLanguage();
+  const { settings } = useSiteSettings();
+  const { getTotalItems, openCart } = useCartStore();
   const totalItems = getTotalItems();
   const { wishlistIds } = useWishlist();
   const wishlistCount = wishlistIds.length;
-  const { t } = useLanguage();
 
   // Track scroll position for header effects
   useEffect(() => {
@@ -78,15 +80,12 @@ export function Header() {
     if (href.includes('#')) {
       const [path, hash] = href.split('#');
       if (location.pathname !== path && path) {
-        // Navigate to the page first, then scroll after a delay
         navigate(href);
       } else {
-        // Already on the page, just scroll
         const element = document.querySelector(`#${hash}`);
         element?.scrollIntoView({ behavior: 'smooth' });
       }
     } else {
-      // For non-hash links like /shop, navigate and scroll to top
       navigate(href);
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
@@ -113,203 +112,189 @@ export function Header() {
 
       <motion.header 
         className={cn(
-          "sticky top-0 z-50 w-full border-b transition-all duration-300 bg-background",
+          "sticky top-0 z-50 w-full transition-all duration-300 bg-background/95 backdrop-blur-sm",
           isScrolled 
-            ? "border-border shadow-md" 
-            : "border-border"
+            ? "border-b border-border/50 shadow-sm" 
+            : "border-b border-transparent"
         )}
         animate={{
           height: isScrolled ? 56 : 64,
         }}
         transition={{ duration: 0.3, ease: 'easeOut' }}
       >
-      <div className={cn(
-        "container flex items-center justify-between px-4 md:px-8 transition-all duration-300",
-        isScrolled ? "h-14" : "h-16"
-      )}>
-        {/* Logo with scale transition */}
-        <motion.div
-          animate={{ scale: isScrolled ? 0.9 : 1 }}
-          transition={{ duration: 0.3 }}
-        >
-          <Logo size={isScrolled ? 'sm' : 'md'} animate={false} />
-        </motion.div>
-
-        {/* Desktop Navigation */}
-        <nav className="hidden items-center gap-6 md:flex">
-          {navLinks.map((link) => (
-          <button
-              key={link.key}
-              onClick={() => handleNavClick(link.href)}
-              className={cn(
-                "text-sm font-medium transition-colors hover:text-primary",
-                link.highlight 
-                  ? "text-destructive font-semibold animate-pulse" 
-                  : "text-muted-foreground"
-              )}
-            >
-              {link.highlight && <span className="mr-1">🔥</span>}
-              {t(link.key)}
-            </button>
-          ))}
-          
-          {/* Follow Us Section */}
-          <div className="flex items-center gap-2 border-l border-border pl-6">
-            <span className="text-xs text-muted-foreground">{t('followUs')}</span>
-            <div className="flex items-center gap-1">
-              {socialLinks.map((social) => (
-                <a
-                  key={social.name}
-                  href={social.href}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex h-7 w-7 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-primary hover:bg-primary/10"
-                  aria-label={social.name}
-                >
-                  {social.isWhatsApp ? (
-                    <svg viewBox="0 0 24 24" className="h-4 w-4 fill-current">
-                      <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>
-                    </svg>
-                  ) : (
-                    <social.icon className="h-4 w-4" />
-                  )}
-                </a>
-              ))}
-            </div>
-          </div>
-        </nav>
-
-        {/* Right Actions - Shopee Style */}
-        <div className="flex items-center gap-1">
-          {/* Notification Bell */}
-          <NotificationBell />
-
-          {/* Search Button */}
-          <Button 
-            variant="ghost" 
-            size="icon" 
-            onClick={() => setIsSearchOpen(true)}
-            className="relative"
+        <div className={cn(
+          "container flex items-center justify-between px-4 md:px-8 transition-all duration-300",
+          isScrolled ? "h-14" : "h-16"
+        )}>
+          {/* Logo - Clean and Minimal */}
+          <motion.div
+            animate={{ scale: isScrolled ? 0.9 : 1 }}
+            transition={{ duration: 0.3 }}
           >
-            <Search className="h-5 w-5" />
-            <span className="sr-only">Search</span>
-          </Button>
+            <Logo size={isScrolled ? 'sm' : 'md'} animate={false} showText={false} />
+          </motion.div>
 
-          {/* Wishlist with badge */}
-          <Button 
-            variant="ghost" 
-            size="icon" 
-            onClick={() => navigate('/wishlist')}
-            className="hidden sm:flex relative"
-          >
-            <Heart className="h-5 w-5" />
-            {wishlistCount > 0 && (
-              <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-destructive text-xs font-medium text-destructive-foreground">
-                {wishlistCount > 9 ? '9+' : wishlistCount}
-              </span>
-            )}
-            <span className="sr-only">Wishlist</span>
-          </Button>
-
-          {/* User Menu - Shopee Style */}
-          {user ? (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="sm" className="gap-1 group">
-                  <div className="flex items-center gap-2">
-                    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-primary to-almans-gold flex items-center justify-center">
-                      <span className="text-xs font-bold text-primary-foreground uppercase">
-                        {user.email?.charAt(0)}
-                      </span>
-                    </div>
-                    <span className="hidden lg:inline text-sm max-w-[100px] truncate">
-                      {user.email?.split('@')[0]}
-                    </span>
-                    <ChevronDown className="h-4 w-4 hidden sm:block transition-transform group-data-[state=open]:rotate-180" />
-                  </div>
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-56 p-2">
-                <div className="px-2 py-3 border-b border-border mb-2">
-                  <p className="text-sm font-medium">{t('welcomeBack')}</p>
-                  <p className="text-xs text-muted-foreground truncate">{user.email}</p>
-                </div>
-                <DropdownMenuItem onClick={() => navigate('/account')} className="py-2.5">
-                  <User className="h-4 w-4 mr-3" />
-                  {t('myAccount')}
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => navigate('/account?tab=orders')} className="py-2.5">
-                  <Package className="h-4 w-4 mr-3" />
-                  {t('myOrders')}
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => navigate('/wishlist')} className="py-2.5">
-                  <Heart className="h-4 w-4 mr-3" />
-                  {t('myWishlist')}
-                </DropdownMenuItem>
-                {isAdmin && (
-                  <>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem onClick={() => navigate('/admin')} className="py-2.5">
-                      <Settings className="h-4 w-4 mr-3" />
-                      Admin Dashboard
-                    </DropdownMenuItem>
-                  </>
+          {/* Desktop Navigation - Hidden on mobile */}
+          <nav className="hidden items-center gap-6 md:flex">
+            {navLinks.map((link) => (
+              <button
+                key={link.key}
+                onClick={() => handleNavClick(link.href)}
+                className={cn(
+                  "text-sm font-medium transition-colors hover:text-primary",
+                  link.highlight 
+                    ? "text-destructive font-semibold animate-pulse" 
+                    : "text-muted-foreground"
                 )}
-                <DropdownMenuSeparator />
-                <DropdownMenuItem 
-                  onClick={handleSignOutClick} 
-                  className="py-2.5 text-destructive focus:text-destructive"
-                >
-                  <LogOut className="h-4 w-4 mr-3" />
-                  {t('signOut')}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          ) : (
+              >
+                {link.highlight && <span className="mr-1">🔥</span>}
+                {t(link.key)}
+              </button>
+            ))}
+            
+            {/* Follow Us Section */}
+            <div className="flex items-center gap-2 border-l border-border pl-6">
+              <span className="text-xs text-muted-foreground">{t('followUs')}</span>
+              <div className="flex items-center gap-1">
+                {socialLinks.map((social) => (
+                  <a
+                    key={social.name}
+                    href={social.href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex h-7 w-7 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-primary hover:bg-primary/10"
+                    aria-label={social.name}
+                  >
+                    {social.isWhatsApp ? (
+                      <svg viewBox="0 0 24 24" className="h-4 w-4 fill-current">
+                        <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>
+                      </svg>
+                    ) : (
+                      <social.icon className="h-4 w-4" />
+                    )}
+                  </a>
+                ))}
+              </div>
+            </div>
+          </nav>
+
+          {/* Right Actions - Minimal Icons */}
+          <div className="flex items-center gap-0.5 md:gap-1">
+            {/* Notification Bell */}
+            <NotificationBell />
+
+            {/* Search Button */}
             <Button 
               variant="ghost" 
-              size="sm" 
-              onClick={() => navigate('/auth')}
-              className="gap-2"
+              size="icon" 
+              onClick={() => setIsSearchOpen(true)}
+              className="h-10 w-10"
             >
-              <User className="h-5 w-5" />
-              <span className="hidden sm:inline">{t('login')}</span>
+              <Search className="h-5 w-5" />
+              <span className="sr-only">Search</span>
             </Button>
-          )}
 
-          {/* My Bag - hidden on mobile since it's in bottom nav */}
-          <Button
-            variant="ghost"
-            size="sm"
-            className="relative gap-2 hidden md:flex"
-            onClick={openCart}
-          >
-            <ShoppingBag className="h-5 w-5" />
-            <span className="hidden sm:inline">{t('myBag')}</span>
-            {totalItems > 0 && (
-              <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary text-xs font-medium text-primary-foreground">
-                {totalItems}
-              </span>
+            {/* User Menu */}
+            {user ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="icon" className="h-10 w-10">
+                    <User className="h-5 w-5" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-56 p-2">
+                  <div className="px-2 py-3 border-b border-border mb-2">
+                    <p className="text-sm font-medium">{t('welcomeBack')}</p>
+                    <p className="text-xs text-muted-foreground truncate">{user.email}</p>
+                  </div>
+                  <DropdownMenuItem onClick={() => navigate('/account')} className="py-2.5">
+                    <User className="h-4 w-4 mr-3" />
+                    {t('myAccount')}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => navigate('/account?tab=orders')} className="py-2.5">
+                    <Package className="h-4 w-4 mr-3" />
+                    {t('myOrders')}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => navigate('/wishlist')} className="py-2.5">
+                    <Heart className="h-4 w-4 mr-3" />
+                    {t('myWishlist')}
+                  </DropdownMenuItem>
+                  {isAdmin && (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem onClick={() => navigate('/admin')} className="py-2.5">
+                        <Settings className="h-4 w-4 mr-3" />
+                        Admin Dashboard
+                      </DropdownMenuItem>
+                    </>
+                  )}
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem 
+                    onClick={handleSignOutClick} 
+                    className="py-2.5 text-destructive focus:text-destructive"
+                  >
+                    <LogOut className="h-4 w-4 mr-3" />
+                    {t('signOut')}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : (
+              <Button 
+                variant="ghost" 
+                size="icon"
+                onClick={() => navigate('/auth')}
+                className="h-10 w-10"
+              >
+                <User className="h-5 w-5" />
+              </Button>
             )}
-          </Button>
 
-          {/* Settings Panel (Language, Currency, Theme) - Desktop only */}
-          <div className="hidden md:block">
-            <SettingsPanel />
+            {/* Wishlist - Desktop only */}
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              onClick={() => navigate('/wishlist')}
+              className="hidden md:flex relative h-10 w-10"
+            >
+              <Heart className="h-5 w-5" />
+              {wishlistCount > 0 && (
+                <span className="absolute -top-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-destructive text-[10px] font-medium text-destructive-foreground">
+                  {wishlistCount > 9 ? '9+' : wishlistCount}
+                </span>
+              )}
+            </Button>
+
+            {/* Cart - Desktop only */}
+            <Button
+              variant="ghost"
+              size="icon"
+              className="relative hidden md:flex h-10 w-10"
+              onClick={openCart}
+            >
+              <ShoppingBag className="h-5 w-5" />
+              {totalItems > 0 && (
+                <span className="absolute -top-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-primary text-[10px] font-medium text-primary-foreground">
+                  {totalItems}
+                </span>
+              )}
+            </Button>
+
+            {/* Settings Panel - Desktop only */}
+            <div className="hidden md:block">
+              <SettingsPanel />
+            </div>
+
+            {/* Mobile Menu Toggle - Hamburger */}
+            <Button
+              variant="ghost"
+              size="icon"
+              className="md:hidden h-10 w-10"
+              onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+            >
+              {isMobileMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+            </Button>
           </div>
-
-          {/* Mobile Menu Toggle */}
-          <Button
-            variant="ghost"
-            size="icon"
-            className="md:hidden"
-            onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-          >
-            {isMobileMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
-          </Button>
         </div>
-      </div>
-
       </motion.header>
 
       <MobileMenuOverlay
@@ -338,7 +323,6 @@ export function Header() {
           handleSignOutClick();
         }}
       />
-
 
       {/* Sign Out Confirmation Dialog */}
       <AlertDialog open={showSignOutDialog} onOpenChange={setShowSignOutDialog}>
