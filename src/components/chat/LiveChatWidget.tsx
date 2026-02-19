@@ -159,10 +159,10 @@ export function LiveChatWidget() {
       {/* Chat Button - positioned above WhatsApp on mobile */}
       <button
         onClick={() => setIsOpen(true)}
-        className="fixed bottom-[7.5rem] right-3 z-50 flex h-12 w-12 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-lg hover:bg-primary/90 transition-colors md:bottom-24 md:right-6 md:h-14 md:w-14"
+        className="fixed bottom-[6.5rem] right-3 z-50 flex h-10 w-10 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-lg hover:bg-primary/90 transition-colors md:bottom-24 md:right-6 md:h-12 md:w-12"
         aria-label="Open live chat"
       >
-        <MessageCircle className="h-5 w-5 md:h-6 md:w-6" />
+        <MessageCircle className="h-4 w-4 md:h-5 md:w-5" />
       </button>
 
       {/* Chat Window */}
