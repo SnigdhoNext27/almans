@@ -17,10 +17,10 @@ export function WhatsAppButton() {
       href={whatsappUrl}
       target="_blank"
       rel="noopener noreferrer"
-      className="fixed bottom-36 right-3 z-50 flex h-12 w-12 items-center justify-center rounded-2xl bg-[#25D366] text-white shadow-lg hover:bg-[#20BD5A] transition-colors md:bottom-6 md:right-6 md:h-14 md:w-14"
+      className="fixed bottom-[8.5rem] right-3 z-50 flex h-10 w-10 items-center justify-center rounded-2xl bg-[#25D366] text-white shadow-lg hover:bg-[#20BD5A] transition-colors md:bottom-6 md:right-6 md:h-12 md:w-12"
       aria-label="Chat on WhatsApp"
     >
-      <WhatsAppIcon className="h-6 w-6 md:h-7 md:w-7" />
+      <WhatsAppIcon className="h-5 w-5 md:h-6 md:w-6" />
       
       {/* Static green dot indicator */}
       <span className="absolute -top-0.5 -right-0.5 h-3 w-3 rounded-full bg-[#4ADE80] border-2 border-background" />
