@@ -81,7 +81,7 @@ export const ShopCategoriesGrid = memo(function ShopCategoriesGrid() {
   };
 
   return (
-    <section className="py-16 bg-gradient-to-b from-secondary/30 via-accent/10 to-background relative overflow-hidden">
+    <section className="py-14 bg-gradient-to-b from-secondary/20 via-accent/5 to-background relative overflow-hidden">
       {/* Decorative Background Elements - disabled on low-end */}
       {enableDecorations && (
         <div className="absolute inset-0 pointer-events-none">
@@ -99,7 +99,7 @@ export const ShopCategoriesGrid = memo(function ShopCategoriesGrid() {
           <span className="text-primary font-medium text-sm tracking-widest uppercase mb-2 block">
             Explore Our Collection
           </span>
-          <h2 className="font-display text-4xl md:text-5xl font-bold text-foreground mb-4">
+          <h2 className="font-display text-3xl md:text-4xl font-bold text-foreground mb-3">
             Shop By Category
           </h2>
           <p className="text-muted-foreground max-w-xl mx-auto">

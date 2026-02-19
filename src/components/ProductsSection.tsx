@@ -469,7 +469,7 @@ export function ProductsSection() {
   }
 
   return (
-    <section id="products" className="py-20 bg-gradient-to-b from-background via-secondary/10 to-background relative overflow-hidden">
+    <section id="products" className="py-16 bg-gradient-to-b from-background via-secondary/5 to-background relative overflow-hidden">
       {/* Subtle Background Pattern */}
       <div className="absolute inset-0 pointer-events-none">
         <div className="absolute top-0 right-0 w-96 h-96 bg-primary/5 rounded-full blur-3xl" />
@@ -488,7 +488,7 @@ export function ProductsSection() {
           <span className="text-primary font-medium text-sm tracking-widest uppercase mb-2 block">
             Our Collection
           </span>
-          <h2 className="font-display text-4xl md:text-5xl font-bold text-foreground mb-4 tracking-wide">
+          <h2 className="font-display text-3xl md:text-4xl font-bold text-foreground mb-3 tracking-wide">
             ALL PRODUCTS
           </h2>
           <p className="text-muted-foreground max-w-xl mx-auto">

@@ -159,7 +159,7 @@ export function Hero() {
       onTouchMove={onTouchMove}
       onTouchEnd={onTouchEnd}
     >
-      <div className="relative h-[85vh] min-h-[550px] max-h-[800px]">
+      <div className="relative h-[80vh] min-h-[500px] max-h-[750px]">
         {/* Background Image with Parallax */}
         <AnimatePresence mode="wait" custom={direction}>
           <motion.div
@@ -178,8 +178,8 @@ export function Hero() {
               className="h-full w-full object-cover object-center"
             />
             {/* Gradient Overlays */}
-            <div className="absolute inset-0 bg-gradient-to-r from-almans-chocolate/85 via-almans-chocolate/50 to-transparent" />
-            <div className="absolute inset-0 bg-gradient-to-t from-almans-chocolate/50 via-transparent to-almans-chocolate/20" />
+            <div className="absolute inset-0 bg-gradient-to-r from-almans-chocolate/75 via-almans-chocolate/40 to-transparent" />
+            <div className="absolute inset-0 bg-gradient-to-t from-almans-chocolate/40 via-transparent to-almans-chocolate/10" />
           </motion.div>
         </AnimatePresence>
 
@@ -232,7 +232,7 @@ export function Hero() {
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -25 }}
                   transition={{ duration: 0.5, delay: 0.1 }}
-                  className="font-display text-5xl sm:text-6xl md:text-7xl lg:text-8xl font-bold text-almans-cream mb-2"
+                  className="font-display text-4xl sm:text-5xl md:text-6xl lg:text-7xl font-bold text-almans-cream mb-2 tracking-wide"
                   style={{ textShadow: '0 4px 20px rgba(0,0,0,0.3)' }}
                 >
                   {slide.title}
@@ -244,7 +244,7 @@ export function Hero() {
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -15 }}
                   transition={{ duration: 0.4, delay: 0.2 }}
-                  className="font-display text-xl sm:text-2xl md:text-3xl italic text-almans-gold mb-5"
+                  className="font-display text-lg sm:text-xl md:text-2xl italic text-almans-gold/90 mb-4"
                   style={{ textShadow: '0 2px 15px rgba(191, 149, 90, 0.25)' }}
                 >
                   {slide.tagline}
@@ -256,7 +256,7 @@ export function Hero() {
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -15 }}
                   transition={{ duration: 0.4, delay: 0.3 }}
-                  className="mb-8 text-sm sm:text-base text-almans-cream/80 leading-relaxed max-w-md"
+                  className="mb-7 text-sm sm:text-base text-almans-cream/70 leading-relaxed max-w-md"
                 >
                   {slide.description}
                 </motion.p>
