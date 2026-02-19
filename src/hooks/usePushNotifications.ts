@@ -37,7 +37,7 @@ export function usePushNotifications() {
       console.log('Service Worker registered:', registration.scope);
       
       // Check if already subscribed
-      const subscription = await registration.pushManager.getSubscription();
+      const subscription = await (registration as any).pushManager?.getSubscription();
       setState(prev => ({ ...prev, isSubscribed: !!subscription }));
     } catch (error) {
       console.error('Service Worker registration failed:', error);
