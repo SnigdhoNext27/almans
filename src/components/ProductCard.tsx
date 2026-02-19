@@ -97,7 +97,7 @@ export const ProductCard = memo(function ProductCard({ product, index = 0 }: Pro
       onClick={handleCardClick}
     >
       {/* Image Container */}
-      <div className="relative mb-4 aspect-[4/5] overflow-hidden rounded-2xl bg-card shadow-sm">
+      <div className="relative mb-3 aspect-[4/5] overflow-hidden rounded-xl bg-card shadow-soft">
         {/* Optimized image with lazy loading and responsive sizing */}
         {shouldReduceAnimations ? (
           <OptimizedImage
@@ -213,33 +213,33 @@ export const ProductCard = memo(function ProductCard({ product, index = 0 }: Pro
       </div>
 
       {/* Product Info */}
-      <div className="space-y-2">
-        <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+      <div className="space-y-1.5 px-0.5">
+        <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
           {product.category}
         </p>
-        <h3 className="font-display text-lg font-semibold text-foreground line-clamp-1">
+        <h3 className="font-display text-base font-semibold text-foreground line-clamp-1">
           {product.name}
         </h3>
         <div className="flex items-center gap-2">
-          <span className="text-lg font-bold text-primary">
+          <span className="text-base font-bold text-foreground">
             {format(product.price)}
           </span>
           {product.originalPrice && (
-            <span className="text-sm text-muted-foreground line-through">
+            <span className="text-xs text-muted-foreground line-through">
               {format(product.originalPrice)}
             </span>
           )}
         </div>
 
         {/* Action Button */}
-        <div className="pt-2">
+        <div className="pt-1.5">
           <Button
             variant="default"
             size="sm"
-            className="w-full gap-2"
+            className="w-full gap-2 rounded-lg text-xs h-9"
             onClick={handleAddToBag}
           >
-            <ShoppingBag className="h-4 w-4" />
+            <ShoppingBag className="h-3.5 w-3.5" />
             ADD TO BAG
           </Button>
         </div>

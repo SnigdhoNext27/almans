@@ -50,7 +50,7 @@ export function Footer() {
   ];
 
   return (
-    <footer className="bg-almans-chocolate text-almans-cream">
+    <footer className="bg-almans-chocolate text-almans-cream/90">
       {/* Brand Banner */}
       <div className="border-b border-almans-cream/10 overflow-hidden">
         <motion.div
@@ -60,7 +60,7 @@ export function Footer() {
           className="py-12"
         >
           <h2
-            className="font-display text-[15vw] md:text-[12vw] font-bold text-center tracking-widest text-almans-cream/10 whitespace-nowrap"
+            className="font-display text-[12vw] md:text-[10vw] font-bold text-center tracking-widest text-almans-cream/6 whitespace-nowrap"
             style={{ letterSpacing: '0.2em' }}
           >
             ALMANS

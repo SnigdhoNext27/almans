@@ -86,18 +86,18 @@ export const CollectionSection = memo(function CollectionSection() {
   };
 
   return (
-    <section className="py-20 bg-background">
+    <section className="py-16 bg-background">
       <div className="container px-4 md:px-8">
         {/* Section Header */}
         <Wrapper
           {...headerProps}
-          className="mb-12 flex flex-col md:flex-row md:items-end md:justify-between gap-4"
+          className="mb-10 flex flex-col md:flex-row md:items-end md:justify-between gap-4"
         >
           <div>
-            <h2 className="font-display text-4xl md:text-5xl font-bold text-foreground mb-2">
+          <h2 className="font-display text-3xl md:text-4xl font-bold text-foreground mb-2">
               Autumn / Winter
             </h2>
-            <h3 className="font-display text-3xl md:text-4xl font-bold text-foreground">
+            <h3 className="font-display text-2xl md:text-3xl font-bold text-foreground">
               collection 2026
             </h3>
           </div>
