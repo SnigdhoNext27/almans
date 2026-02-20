@@ -112,10 +112,10 @@ export function Header() {
 
       <motion.header 
         className={cn(
-          "sticky top-0 z-50 w-full transition-all duration-300 bg-background/98 backdrop-blur-sm",
+          "sticky top-0 z-50 w-full transition-all duration-300 bg-background backdrop-blur-sm",
           isScrolled 
-            ? "border-b border-border/50 shadow-sm" 
-            : "border-b border-transparent"
+            ? "border-b border-border shadow-sm" 
+            : "border-b border-border/60"
         )}
         animate={{
           height: isScrolled ? 56 : 64,

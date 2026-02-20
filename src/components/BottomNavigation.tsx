@@ -47,7 +47,7 @@ export function BottomNavigation() {
       initial={{ y: 100 }}
       animate={{ y: 0 }}
       transition={{ type: 'spring', stiffness: 300, damping: 30 }}
-      className="fixed bottom-0 left-0 right-0 z-50 md:hidden bg-background/98 backdrop-blur-md border-t border-border/40"
+      className="fixed bottom-0 left-0 right-0 z-50 md:hidden bg-background backdrop-blur-md border-t border-border"
       style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
     >
       <div className="flex items-center justify-around h-[64px] px-2">
