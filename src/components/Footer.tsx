@@ -50,7 +50,7 @@ export function Footer() {
   ];
 
   return (
-    <footer className="bg-almans-chocolate text-almans-cream/90">
+    <footer className="bg-almans-chocolate text-almans-cream">
       {/* Brand Banner */}
       <div className="border-b border-almans-cream/10 overflow-hidden">
         <motion.div
