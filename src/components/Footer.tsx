@@ -77,7 +77,7 @@ export function Footer() {
               <WolfLogoIcon className="h-11 w-11" variant="light" />
               <span className="font-display text-xl font-bold tracking-wider">ALMANS</span>
             </div>
-            <p className="text-almans-cream/60 text-sm mb-6">
+            <p className="text-almans-cream/80 text-sm mb-6">
               Where your vibes meet our vision. Premium fashion essentials for the modern individual.
             </p>
           </div>
@@ -91,7 +91,7 @@ export function Footer() {
                   <li key={link}>
                     <a
                       href="#"
-                      className="text-sm text-almans-cream/60 hover:text-almans-cream transition-colors"
+                      className="text-sm text-almans-cream/80 hover:text-almans-cream transition-colors"
                     >
                       {link}
                     </a>
@@ -113,8 +113,8 @@ export function Footer() {
                   key={method.name}
                   className={`flex items-center gap-2 px-4 py-2 rounded-lg border ${
                     method.available 
-                      ? 'border-almans-cream/30 bg-almans-cream/5' 
-                      : 'border-almans-cream/10 bg-almans-cream/5 opacity-50'
+                    ? 'border-almans-cream/40 bg-almans-cream/10' 
+                       : 'border-almans-cream/20 bg-almans-cream/5 opacity-60'
                   }`}
                 >
                   <method.icon className="h-5 w-5" />
@@ -137,7 +137,7 @@ export function Footer() {
                   href={social.href}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex items-center gap-3 text-almans-cream/60 hover:text-almans-cream transition-colors group"
+                  className="flex items-center gap-3 text-almans-cream/80 hover:text-almans-cream transition-colors group"
                 >
                   <div className="flex h-10 w-10 items-center justify-center rounded-full border border-almans-cream/20 group-hover:border-almans-cream group-hover:bg-almans-cream/10 transition-all">
                     {social.isWhatsApp ? (
@@ -157,10 +157,10 @@ export function Footer() {
       {/* Bottom Bar */}
       <div className="border-t border-almans-cream/10">
         <div className="container px-4 md:px-8 py-6 flex flex-col md:flex-row items-center justify-between gap-4">
-          <p className="text-sm text-almans-cream/60">
+          <p className="text-sm text-almans-cream/80">
             ©2025 Almans. All rights reserved.
           </p>
-          <a href="#" className="text-sm text-almans-cream/60 hover:text-almans-cream transition-colors">
+          <a href="#" className="text-sm text-almans-cream/80 hover:text-almans-cream transition-colors">
             Privacy policy
           </a>
         </div>
