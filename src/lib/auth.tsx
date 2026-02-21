@@ -38,6 +38,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setTimeout(() => {
             checkAdminRole(session.user.id);
           }, 0);
+          // Sync OAuth avatar on sign-in
+          if (event === 'SIGNED_IN') {
+            syncOAuthAvatar(session.user);
+          }
         } else {
           setIsAdmin(false);
           setUserRole(null);
@@ -79,6 +83,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch {
       setIsAdmin(false);
       setUserRole(null);
+    }
+  };
+
+  const syncOAuthAvatar = async (authUser: User) => {
+    const avatarUrl = authUser.user_metadata?.avatar_url || authUser.user_metadata?.picture;
+    if (!avatarUrl) return;
+
+    try {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('avatar_url')
+        .eq('id', authUser.id)
+        .maybeSingle();
+
+      // Only set if profile has no avatar yet
+      if (profile && !profile.avatar_url) {
+        await supabase
+          .from('profiles')
+          .update({ avatar_url: avatarUrl })
+          .eq('id', authUser.id);
+      }
+    } catch {
+      // Silent fail - avatar sync is non-critical
     }
   };
 
