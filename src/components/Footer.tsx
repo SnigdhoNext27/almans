@@ -158,7 +158,7 @@ export function Footer() {
       <div className="border-t border-almans-cream/10">
         <div className="container px-4 md:px-8 py-6 flex flex-col md:flex-row items-center justify-between gap-4">
           <p className="text-sm text-almans-cream/80">
-            ©2025 Almans. All rights reserved.
+            ©{new Date().getFullYear()} Almans. All rights reserved.
           </p>
           <a href="#" className="text-sm text-almans-cream/80 hover:text-almans-cream transition-colors">
             Privacy policy
