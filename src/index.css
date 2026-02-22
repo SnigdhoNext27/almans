@@ -644,3 +644,81 @@ body {
     image-rendering: crisp-edges;
   }
 }
+
+/* ===== GOLDEN GLOW & CARD HOVER EFFECTS ===== */
+.glow-gold {
+  box-shadow: 0 8px 30px -8px hsl(var(--almans-gold) / 0.3);
+}
+
+.card-hover-glow {
+  transition: transform 0.4s ease, box-shadow 0.4s ease;
+}
+
+.card-hover-glow:hover {
+  transform: translateY(-4px) scale(1.01);
+  box-shadow: 0 12px 40px -10px hsl(var(--almans-gold) / 0.25);
+}
+
+/* Badge pulse animation */
+@keyframes gentlePulse {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.05);
+    opacity: 0.9;
+  }
+}
+
+.badge-pulse {
+  animation: gentlePulse 2s ease-in-out infinite;
+}
+
+/* Hero shimmer sweep */
+@keyframes heroShimmer {
+  0% {
+    transform: translateX(-100%) skewX(-15deg);
+  }
+  100% {
+    transform: translateX(200%) skewX(-15deg);
+  }
+}
+
+.hero-shimmer {
+  animation: heroShimmer 4s ease-in-out infinite;
+  animation-delay: 1s;
+}
+
+/* Floating particle */
+@keyframes floatParticle {
+  0% {
+    opacity: 0;
+    transform: translateY(0) scale(0.5);
+  }
+  20% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-60px) scale(0);
+  }
+}
+
+.float-particle {
+  animation: floatParticle 3s ease-out infinite;
+}
+
+/* Avatar prompt pulse */
+@keyframes avatarPulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 hsl(var(--primary) / 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 8px hsl(var(--primary) / 0);
+  }
+}
+
+.avatar-prompt-pulse {
+  animation: avatarPulse 2s ease-in-out infinite;
+}

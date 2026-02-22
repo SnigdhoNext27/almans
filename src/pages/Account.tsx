@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Helmet } from 'react-helmet-async';
-import { Package, User, MapPin, Lock, ChevronRight, Loader2, Plus, Trash2, Edit, Calendar, Shield, FileText } from 'lucide-react';
+import { Package, User, MapPin, Lock, ChevronRight, Loader2, Plus, Trash2, Edit, Calendar, Shield, FileText, Camera, X } from 'lucide-react';
 import { z } from 'zod';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -472,6 +472,36 @@ export default function Account() {
                     <h1 className="font-display text-2xl font-bold">My Profile</h1>
                     <p className="text-muted-foreground">Manage and protect your account</p>
                   </div>
+
+                  {/* Avatar Upload Banner */}
+                  {!profile?.avatar_url && (
+                    <motion.div
+                      initial={{ opacity: 0, y: -10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="mb-6 rounded-xl bg-gradient-to-r from-primary/10 via-almans-gold/5 to-accent p-4 sm:p-5 border border-primary/15"
+                    >
+                      <div className="flex flex-col sm:flex-row items-center gap-4">
+                        <div className="flex-shrink-0 w-12 h-12 rounded-full bg-primary/15 flex items-center justify-center avatar-prompt-pulse">
+                          <Camera className="w-6 h-6 text-primary" />
+                        </div>
+                        <div className="text-center sm:text-left flex-1">
+                          <h3 className="font-display font-semibold text-foreground text-sm sm:text-base">Complete your profile</h3>
+                          <p className="text-muted-foreground text-xs sm:text-sm mt-0.5">Add a profile photo to personalize your account</p>
+                        </div>
+                        <Button
+                          size="sm"
+                          className="gap-2 whitespace-nowrap"
+                          onClick={() => {
+                            const fileInput = document.querySelector<HTMLInputElement>('input[type="file"][accept="image/jpeg,image/png"]');
+                            fileInput?.click();
+                          }}
+                        >
+                          <Camera className="w-4 h-4" />
+                          Upload Photo
+                        </Button>
+                      </div>
+                    </motion.div>
+                  )}
 
                   <div className="flex flex-col lg:flex-row gap-8">
                     {/* Profile Form */}
