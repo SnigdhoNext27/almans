@@ -97,7 +97,7 @@ export const ProductCard = memo(function ProductCard({ product, index = 0 }: Pro
       onClick={handleCardClick}
     >
       {/* Image Container */}
-      <div className="relative mb-3 aspect-[4/5] overflow-hidden rounded-xl bg-card shadow-soft">
+      <div className={`relative mb-3 aspect-[4/5] overflow-hidden rounded-xl bg-card shadow-soft transition-shadow duration-400 ${!shouldReduceAnimations ? 'group-hover:glow-gold' : ''}`}>
         {/* Optimized image with lazy loading and responsive sizing */}
         {shouldReduceAnimations ? (
           <OptimizedImage
@@ -131,7 +131,7 @@ export const ProductCard = memo(function ProductCard({ product, index = 0 }: Pro
                 product.badge === 'new'
                   ? 'bg-primary text-primary-foreground'
                   : product.badge === 'sale'
-                  ? 'bg-destructive text-destructive-foreground'
+                  ? 'bg-destructive text-destructive-foreground badge-pulse'
                   : 'bg-almans-gold text-almans-chocolate'
               }`}
             >

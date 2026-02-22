@@ -52,7 +52,7 @@ const CollectionCard = memo(function CollectionCard({
   return (
     <Wrapper
       {...wrapperProps}
-      className={`relative overflow-hidden rounded-3xl group ${isLarge ? 'aspect-[4/3] md:row-span-2' : 'aspect-[4/3]'}`}
+      className={`relative overflow-hidden rounded-3xl group card-hover-glow ${isLarge ? 'aspect-[4/3] md:row-span-2' : 'aspect-[4/3]'}`}
     >
       <div className={`w-full h-full ${!shouldReduceAnimations ? 'transition-transform duration-500 group-hover:scale-105' : ''}`}>
         <OptimizedImage
@@ -62,7 +62,7 @@ const CollectionCard = memo(function CollectionCard({
           preset={isLarge ? 'hero' : 'category'}
         />
       </div>
-      <div className="absolute inset-0 bg-gradient-to-t from-almans-chocolate/80 via-transparent to-transparent" />
+      <div className="absolute inset-0 bg-gradient-to-t from-almans-chocolate/85 via-almans-chocolate/20 to-transparent transition-opacity duration-500 group-hover:from-almans-chocolate/90" />
       <div className="absolute bottom-6 left-6 right-6">
         <h3 className={`font-display font-bold text-almans-cream mb-2 ${isLarge ? 'text-2xl md:text-3xl' : 'text-xl md:text-2xl'}`}>
           {item.name}

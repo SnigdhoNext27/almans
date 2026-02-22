@@ -180,8 +180,39 @@ export function Hero() {
             {/* Gradient Overlays */}
             <div className="absolute inset-0 bg-gradient-to-r from-almans-chocolate/75 via-almans-chocolate/40 to-transparent" />
             <div className="absolute inset-0 bg-gradient-to-t from-almans-chocolate/40 via-transparent to-almans-chocolate/10" />
+            
+            {/* Shimmer Sweep Overlay */}
+            {!shouldReduceAnimations && (
+              <div className="absolute inset-0 overflow-hidden pointer-events-none">
+                <div className="absolute inset-0 w-1/3 bg-gradient-to-r from-transparent via-almans-cream/8 to-transparent hero-shimmer" />
+              </div>
+            )}
           </motion.div>
         </AnimatePresence>
+
+        {/* Floating Particles near CTA area */}
+        {!shouldReduceAnimations && (
+          <div className="absolute bottom-24 left-16 md:left-32 z-10 pointer-events-none">
+            {[0, 1, 2, 3].map((i) => (
+              <motion.div
+                key={i}
+                className="absolute w-1.5 h-1.5 rounded-full bg-almans-gold/60"
+                style={{ left: `${i * 28}px`, bottom: `${i * 12}px` }}
+                animate={{
+                  y: [0, -50, -60],
+                  opacity: [0, 0.8, 0],
+                  scale: [0.5, 1, 0],
+                }}
+                transition={{
+                  duration: 3,
+                  repeat: Infinity,
+                  delay: i * 0.8,
+                  ease: 'easeOut',
+                }}
+              />
+            ))}
+          </div>
+        )}
 
         {/* Large Brand Typography - Background Watermark */}
         <motion.div 

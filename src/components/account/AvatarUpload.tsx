@@ -106,7 +106,7 @@ export function AvatarUpload({ avatarUrl, userId, fullName, onAvatarChange }: Av
         <button
           onClick={() => fileInputRef.current?.click()}
           disabled={uploading}
-          className="absolute bottom-0 right-0 p-2 rounded-full bg-primary text-primary-foreground shadow-md hover:bg-primary/90 transition-colors"
+          className={`absolute bottom-0 right-0 p-2 rounded-full bg-primary text-primary-foreground shadow-md hover:bg-primary/90 transition-colors ${!avatarUrl ? 'avatar-prompt-pulse' : ''}`}
         >
           {uploading ? (
             <Loader2 className="h-4 w-4 animate-spin" />
