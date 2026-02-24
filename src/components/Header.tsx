@@ -2,7 +2,9 @@ import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Search, User, Menu, X, LogOut, Settings, Package, Heart } from 'lucide-react';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
+import { supabase } from '@/integrations/supabase/client';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -57,6 +59,14 @@ export function Header() {
   const totalItems = getTotalItems();
   const { wishlistIds } = useWishlist();
   const wishlistCount = wishlistIds.length;
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+
+  // Fetch user avatar
+  useEffect(() => {
+    if (!user) { setAvatarUrl(null); return; }
+    supabase.from('profiles').select('avatar_url').eq('id', user.id).maybeSingle()
+      .then(({ data }) => { if (data?.avatar_url) setAvatarUrl(data.avatar_url); });
+  }, [user]);
 
   // Track scroll position for header effects
   useEffect(() => {
@@ -199,7 +209,16 @@ export function Header() {
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button variant="ghost" size="icon" className="h-10 w-10">
-                    <User className="h-5 w-5" />
+                    {avatarUrl ? (
+                      <Avatar className="h-7 w-7">
+                        <AvatarImage src={avatarUrl} alt="Profile" />
+                        <AvatarFallback className="text-xs bg-primary/10 text-primary">
+                          <User className="h-4 w-4" />
+                        </AvatarFallback>
+                      </Avatar>
+                    ) : (
+                      <User className="h-5 w-5" />
+                    )}
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-56 p-2">

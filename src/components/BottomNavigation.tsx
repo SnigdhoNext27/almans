@@ -1,9 +1,12 @@
+import { useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Home, Heart, User, Grid3X3, ShoppingBag } from 'lucide-react';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { useCartStore } from '@/lib/store';
 import { useWishlist } from '@/hooks/useWishlist';
 import { useAuth } from '@/lib/auth';
+import { supabase } from '@/integrations/supabase/client';
 
 const navItems = [
   { icon: Home, label: 'Home', path: '/' },
@@ -19,9 +22,17 @@ export function BottomNavigation() {
   const { toggleCart, items } = useCartStore();
   const { wishlistIds } = useWishlist();
   const { user } = useAuth();
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
 
   const cartCount = items.reduce((sum, item) => sum + item.quantity, 0);
   const wishlistCount = wishlistIds.length;
+
+  // Fetch user avatar
+  useEffect(() => {
+    if (!user) { setAvatarUrl(null); return; }
+    supabase.from('profiles').select('avatar_url').eq('id', user.id).maybeSingle()
+      .then(({ data }) => { if (data?.avatar_url) setAvatarUrl(data.avatar_url); });
+  }, [user]);
 
   const handleNavigation = (item: typeof navItems[0]) => {
     if (item.path === 'cart') {
@@ -72,7 +83,16 @@ export function BottomNavigation() {
                 }`}
                 whileTap={{ scale: 0.9 }}
               >
-                <item.icon className={`h-5 w-5 transition-all ${active ? 'stroke-[2.5px]' : 'stroke-[1.5px]'}`} />
+                {item.path === '/account' && user && avatarUrl ? (
+                  <Avatar className="h-5 w-5">
+                    <AvatarImage src={avatarUrl} alt="Profile" />
+                    <AvatarFallback className="text-[8px] bg-primary/10 text-primary">
+                      <User className="h-3 w-3" />
+                    </AvatarFallback>
+                  </Avatar>
+                ) : (
+                  <item.icon className={`h-5 w-5 transition-all ${active ? 'stroke-[2.5px]' : 'stroke-[1.5px]'}`} />
+                )}
                 
                 {/* Badge */}
                 {showBadge && (
