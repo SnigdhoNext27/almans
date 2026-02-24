@@ -504,6 +504,16 @@ export default function Account() {
                   )}
 
                   <div className="flex flex-col lg:flex-row gap-8">
+                    {/* Avatar Upload */}
+                    <div className="flex-shrink-0">
+                      <AvatarUpload
+                        avatarUrl={profile?.avatar_url || null}
+                        userId={user?.id || ''}
+                        fullName={profile?.full_name || null}
+                        onAvatarChange={handleAvatarChange}
+                      />
+                    </div>
+
                     {/* Profile Form */}
                     <div className="flex-1 space-y-6">
                       <div className="grid grid-cols-[120px_1fr] items-center gap-4">
