@@ -1,20 +1,27 @@
 import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { MessageCircle, X, Send, Loader2 } from 'lucide-react';
+import { MessageCircle, X, Send, Loader2, Bot, User } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Badge } from '@/components/ui/badge';
 import { useAuth } from '@/lib/auth';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 
 interface ChatMessage {
   id: string;
-  sender_type: 'customer' | 'admin';
+  sender_type: 'customer' | 'admin' | 'bot';
   message: string;
   created_at: string;
 }
+
+const CANNED = {
+  greeting: "Hi — welcome to Almans! I'm Al-Assistant 🤖. I can help with order status, returns, and product info. What can I help you with today? (Type \"human\" to talk to an agent.)",
+  transfer: "I'm transferring you to a human specialist now — they'll review this chat and reply here shortly.",
+  notFound: "I couldn't locate an order with that number. Please double-check and try again, or type \"human\" for live help.",
+};
 
 export function LiveChatWidget() {
   const [isOpen, setIsOpen] = useState(false);
@@ -23,6 +30,8 @@ export function LiveChatWidget() {
   const [sending, setSending] = useState(false);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [chatStarted, setChatStarted] = useState(false);
+  const [handedOver, setHandedOver] = useState(false);
+  const [aiProcessing, setAiProcessing] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const { user } = useAuth();
   const { toast } = useToast();
@@ -31,10 +40,9 @@ export function LiveChatWidget() {
   useEffect(() => {
     const loadConversation = async () => {
       if (!user) return;
-
       const { data: conversations } = await supabase
         .from('chat_conversations')
-        .select('id')
+        .select('id, handled_by')
         .eq('customer_id', user.id)
         .eq('status', 'open')
         .order('created_at', { ascending: false })
@@ -43,65 +51,53 @@ export function LiveChatWidget() {
       if (conversations && conversations.length > 0) {
         setConversationId(conversations[0].id);
         setChatStarted(true);
+        setHandedOver(conversations[0].handled_by === 'agent');
         loadMessages(conversations[0].id);
       }
     };
-
     loadConversation();
   }, [user]);
 
   // Subscribe to new messages
   useEffect(() => {
     if (!conversationId) return;
-
     const channel = supabase
       .channel(`chat-${conversationId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'chat_messages',
-          filter: `conversation_id=eq.${conversationId}`,
-        },
-        (payload) => {
-          const newMsg = payload.new as ChatMessage;
-          setMessages((prev) => [...prev, newMsg]);
-        }
-      )
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chat_messages', filter: `conversation_id=eq.${conversationId}` }, (payload) => {
+        const newMsg = payload.new as ChatMessage;
+        setMessages((prev) => {
+          if (prev.some(m => m.id === newMsg.id)) return prev;
+          return [...prev, newMsg];
+        });
+      })
       .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    return () => { supabase.removeChannel(channel); };
   }, [conversationId]);
 
-  // Auto-scroll to bottom
+  // Auto-scroll
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
+    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [messages]);
 
   const loadMessages = async (convId: string) => {
-    const { data } = await supabase
-      .from('chat_messages')
-      .select('*')
-      .eq('conversation_id', convId)
-      .order('created_at', { ascending: true });
+    const { data } = await supabase.from('chat_messages').select('*').eq('conversation_id', convId).order('created_at', { ascending: true });
+    if (data) setMessages(data as ChatMessage[]);
+  };
 
-    if (data) {
-      setMessages(data as ChatMessage[]);
-    }
+  const addBotMessage = async (convId: string, text: string) => {
+    await supabase.from('chat_messages').insert({
+      conversation_id: convId,
+      sender_type: 'admin',
+      sender_id: null,
+      message: text,
+    });
   };
 
   const startChat = async () => {
-    // Require user login for chat (authenticated-only)
     if (!user) {
       toast({ title: 'Please sign in to start a chat', variant: 'destructive' });
       return;
     }
-
     try {
       const { data: conversation, error } = await supabase
         .from('chat_conversations')
@@ -110,6 +106,8 @@ export function LiveChatWidget() {
           customer_name: user.user_metadata?.full_name || user.email?.split('@')[0] || 'Customer',
           customer_email: user.email,
           status: 'open',
+          handled_by: 'bot',
+          bot_turn_count: 0,
         })
         .select()
         .single();
@@ -118,45 +116,107 @@ export function LiveChatWidget() {
 
       setConversationId(conversation.id);
       setChatStarted(true);
-      loadMessages(conversation.id);
+
+      // Send bot greeting
+      await addBotMessage(conversation.id, CANNED.greeting);
+      await loadMessages(conversation.id);
     } catch (error) {
       console.error('Error starting chat:', error);
       toast({ title: 'Failed to start chat', variant: 'destructive' });
     }
   };
 
+  const triggerHandover = async (convId: string, reason: string) => {
+    setHandedOver(true);
+    await supabase.from('chat_conversations').update({
+      handled_by: 'agent',
+      escalation_reason: reason,
+      updated_at: new Date().toISOString(),
+    }).eq('id', convId);
+    await addBotMessage(convId, CANNED.transfer);
+  };
+
   const sendMessage = async () => {
     if (!newMessage.trim() || !conversationId || !user) return;
-
+    const msgText = newMessage.trim();
     setSending(true);
+    setNewMessage('');
+
     try {
+      // Insert customer message
       const { error } = await supabase.from('chat_messages').insert({
         conversation_id: conversationId,
         sender_type: 'customer',
         sender_id: user.id,
-        message: newMessage.trim(),
+        message: msgText,
+      });
+      if (error) throw error;
+
+      // If already handed over, no AI needed
+      if (handedOver) { setSending(false); return; }
+
+      // AI triage
+      setAiProcessing(true);
+
+      // Get last 10 messages for transcript
+      const transcript = messages.slice(-10).map(m => ({
+        role: m.sender_type === 'customer' ? 'user' : 'assistant',
+        content: m.message,
+      }));
+
+      const { data, error: fnError } = await supabase.functions.invoke('chat-triage', {
+        body: { conversation_id: conversationId, message: msgText, transcript },
       });
 
-      if (error) throw error;
-      setNewMessage('');
+      if (fnError || !data) {
+        console.error('Triage error:', fnError);
+        setAiProcessing(false);
+        setSending(false);
+        return;
+      }
+
+      if (data.handover) {
+        await triggerHandover(conversationId, data.escalation_reason || 'escalated');
+      } else {
+        await addBotMessage(conversationId, data.reply);
+
+        // Increment bot turn count; force handover after 3 unresolved turns
+        const { data: conv } = await supabase
+          .from('chat_conversations')
+          .select('bot_turn_count')
+          .eq('id', conversationId)
+          .single();
+
+        const newCount = (conv?.bot_turn_count || 0) + 1;
+        await supabase.from('chat_conversations').update({
+          bot_turn_count: newCount,
+          updated_at: new Date().toISOString(),
+        }).eq('id', conversationId);
+
+        if (newCount >= 4) {
+          await triggerHandover(conversationId, 'bot_limit_reached');
+        }
+      }
     } catch (error) {
       console.error('Error sending message:', error);
       toast({ title: 'Failed to send message', variant: 'destructive' });
     } finally {
+      setAiProcessing(false);
       setSending(false);
     }
   };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      sendMessage();
-    }
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+  };
+
+  const getMsgStyle = (msg: ChatMessage) => {
+    if (msg.sender_type === 'customer') return { bubble: 'bg-primary text-primary-foreground', align: 'flex-row-reverse', avatar: 'bg-primary/20 text-primary', icon: User };
+    return { bubble: 'bg-secondary', align: '', avatar: 'bg-muted text-muted-foreground', icon: Bot };
   };
 
   return (
     <>
-      {/* Chat Button - positioned above WhatsApp on mobile */}
       <button
         onClick={() => setIsOpen(true)}
         className="fixed bottom-[6.5rem] right-3 z-50 flex h-9 w-9 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-lg hover:bg-primary/90 transition-colors md:bottom-24 md:right-6 md:h-11 md:w-11"
@@ -165,7 +225,6 @@ export function LiveChatWidget() {
         <MessageCircle className="h-4 w-4 md:h-5 md:w-5" />
       </button>
 
-      {/* Chat Window */}
       <AnimatePresence>
         {isOpen && (
           <motion.div
@@ -181,93 +240,94 @@ export function LiveChatWidget() {
                   <MessageCircle className="h-5 w-5" />
                 </div>
                 <div>
-                  <h3 className="font-semibold">Live Chat</h3>
-                  <p className="text-xs opacity-80">We typically reply instantly</p>
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-semibold">Live Chat</h3>
+                    {chatStarted && (
+                      <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4">
+                        {handedOver ? '👤 Agent' : '🤖 Al-Assistant'}
+                      </Badge>
+                    )}
+                  </div>
+                  <p className="text-xs opacity-80">{handedOver ? 'Human agent assigned' : 'AI-powered support'}</p>
                 </div>
               </div>
-              <button
-                onClick={() => setIsOpen(false)}
-                className="p-1 hover:bg-primary-foreground/20 rounded-lg transition-colors"
-              >
+              <button onClick={() => setIsOpen(false)} className="p-1 hover:bg-primary-foreground/20 rounded-lg transition-colors">
                 <X className="h-5 w-5" />
               </button>
             </div>
 
-            {/* Chat Content */}
             {!chatStarted ? (
               <div className="p-4 space-y-4">
                 <p className="text-sm text-muted-foreground">
-                  {user 
-                    ? "Start a conversation with our support team. We're here to help!"
+                  {user
+                    ? "Chat with our AI assistant. It handles most queries instantly — or escalates to a human if needed."
                     : "Please sign in to start a live chat with our support team."
                   }
                 </p>
-                
                 <Button onClick={startChat} className="w-full">
                   {user ? 'Start Chat' : 'Sign In to Chat'}
                 </Button>
               </div>
             ) : (
               <>
-                {/* Messages */}
                 <ScrollArea className="h-80 p-4" ref={scrollRef}>
                   <div className="space-y-4">
                     {messages.length === 0 && (
-                      <p className="text-center text-sm text-muted-foreground py-8">
-                        Send a message to start the conversation
-                      </p>
+                      <p className="text-center text-sm text-muted-foreground py-8">Loading messages…</p>
                     )}
-                    {messages.map((msg) => (
-                      <div
-                        key={msg.id}
-                        className={`flex gap-2 ${
-                          msg.sender_type === 'customer' ? 'flex-row-reverse' : ''
-                        }`}
-                      >
+                    {messages.map((msg) => {
+                      const style = getMsgStyle(msg);
+                      const Icon = style.icon;
+                      return (
+                        <div key={msg.id} className={`flex gap-2 ${style.align}`}>
+                          <Avatar className="h-8 w-8 shrink-0">
+                            <AvatarFallback className={style.avatar}>
+                              <Icon className="h-4 w-4" />
+                            </AvatarFallback>
+                          </Avatar>
+                          <div className={`rounded-2xl px-4 py-2 max-w-[75%] ${style.bubble}`}>
+                            <p className="text-sm whitespace-pre-wrap">{msg.message}</p>
+                            <p className="text-[10px] opacity-60 mt-1">
+                              {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {aiProcessing && (
+                      <div className="flex gap-2">
                         <Avatar className="h-8 w-8 shrink-0">
-                          <AvatarFallback className={msg.sender_type === 'admin' ? 'bg-primary text-primary-foreground' : 'bg-secondary'}>
-                            {msg.sender_type === 'admin' ? 'A' : 'U'}
+                          <AvatarFallback className="bg-muted text-muted-foreground">
+                            <Bot className="h-4 w-4" />
                           </AvatarFallback>
                         </Avatar>
-                        <div
-                          className={`rounded-2xl px-4 py-2 max-w-[70%] ${
-                            msg.sender_type === 'customer'
-                              ? 'bg-primary text-primary-foreground'
-                              : 'bg-secondary'
-                          }`}
-                        >
-                          <p className="text-sm">{msg.message}</p>
-                          <p className="text-[10px] opacity-60 mt-1">
-                            {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                          </p>
+                        <div className="rounded-2xl px-4 py-3 bg-secondary flex items-center gap-2">
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                          <span className="text-xs text-muted-foreground">Al-Assistant is typing…</span>
                         </div>
                       </div>
-                    ))}
+                    )}
                   </div>
                 </ScrollArea>
 
-                {/* Input */}
                 <div className="p-4 border-t border-border">
                   <div className="flex gap-2">
                     <Input
-                      placeholder="Type a message..."
+                      placeholder={handedOver ? 'Message agent…' : 'Ask Al-Assistant…'}
                       value={newMessage}
                       onChange={(e) => setNewMessage(e.target.value)}
                       onKeyPress={handleKeyPress}
-                      disabled={sending}
+                      disabled={sending || aiProcessing}
                     />
-                    <Button
-                      size="icon"
-                      onClick={sendMessage}
-                      disabled={sending || !newMessage.trim()}
-                    >
-                      {sending ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <Send className="h-4 w-4" />
-                      )}
+                    <Button size="icon" onClick={sendMessage} disabled={sending || aiProcessing || !newMessage.trim()}>
+                      {(sending || aiProcessing) ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                     </Button>
                   </div>
+                  {!handedOver && (
+                    <p className="text-[10px] text-muted-foreground mt-2 text-center">
+                      Type <span className="font-medium">"human"</span> to talk to an agent
+                    </p>
+                  )}
                 </div>
               </>
             )}

@@ -1,5 +1,8 @@
 project_id = "zoincmqtqugkmvakepra"
 
+[functions.chat-triage]
+verify_jwt = false
+
 [functions.newsletter-unsubscribe]
 verify_jwt = false
 

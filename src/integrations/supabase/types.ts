@@ -211,28 +211,37 @@ export type Database = {
       }
       chat_conversations: {
         Row: {
+          bot_turn_count: number
           created_at: string
           customer_email: string | null
           customer_id: string | null
           customer_name: string | null
+          escalation_reason: string | null
+          handled_by: string
           id: string
           status: string
           updated_at: string
         }
         Insert: {
+          bot_turn_count?: number
           created_at?: string
           customer_email?: string | null
           customer_id?: string | null
           customer_name?: string | null
+          escalation_reason?: string | null
+          handled_by?: string
           id?: string
           status?: string
           updated_at?: string
         }
         Update: {
+          bot_turn_count?: number
           created_at?: string
           customer_email?: string | null
           customer_id?: string | null
           customer_name?: string | null
+          escalation_reason?: string | null
+          handled_by?: string
           id?: string
           status?: string
           updated_at?: string
