@@ -14,6 +14,8 @@ interface Conversation {
   customer_name: string | null;
   customer_email: string | null;
   status: string;
+  handled_by: string;
+  escalation_reason: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -118,9 +120,17 @@ export default function AdminChats() {
                 <button key={conv.id} onClick={() => loadMessages(conv.id)} className={`w-full p-4 text-left border-b border-border hover:bg-secondary/50 transition-colors ${selectedConversation === conv.id ? 'bg-secondary' : ''}`}>
                   <div className="flex items-center justify-between mb-1">
                     <span className="font-medium truncate">{conv.customer_name || 'Guest'}</span>
-                    <Badge variant={conv.status === 'open' ? 'default' : 'secondary'} className="text-xs">{conv.status}</Badge>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <Badge variant={conv.handled_by === 'agent' ? 'default' : 'secondary'} className="text-[10px] px-1.5 py-0 h-4">
+                        {conv.handled_by === 'agent' ? '👤' : '🤖'}
+                      </Badge>
+                      <Badge variant={conv.status === 'open' ? 'default' : 'secondary'} className="text-xs">{conv.status}</Badge>
+                    </div>
                   </div>
                   <p className="text-xs text-muted-foreground truncate">{conv.customer_email}</p>
+                  {conv.escalation_reason && (
+                    <p className="text-xs text-destructive truncate mt-0.5">⚠ {conv.escalation_reason.replace(/_/g, ' ')}</p>
+                  )}
                   <div className="flex items-center gap-1 mt-1 text-xs text-muted-foreground"><Clock className="h-3 w-3" />{getTimeAgo(conv.updated_at)}</div>
                 </button>
               ))

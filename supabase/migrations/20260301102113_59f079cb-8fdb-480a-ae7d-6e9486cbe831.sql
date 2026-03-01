@@ -1,0 +1,5 @@
+
+ALTER TABLE public.chat_conversations
+  ADD COLUMN IF NOT EXISTS handled_by TEXT NOT NULL DEFAULT 'bot',
+  ADD COLUMN IF NOT EXISTS escalation_reason TEXT,
+  ADD COLUMN IF NOT EXISTS bot_turn_count INTEGER NOT NULL DEFAULT 0;
