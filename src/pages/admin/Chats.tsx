@@ -15,6 +15,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { PanelRight } from 'lucide-react';
 
 interface Conversation {
   id: string;
@@ -59,6 +60,7 @@ export default function AdminChats() {
   const [copilotLoading, setCopilotLoading] = useState(false);
   const [checklist, setChecklist] = useState<boolean[]>([]);
   const [closing, setClosing] = useState(false);
+  const [copilotOpen, setCopilotOpen] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
   const { user } = useAuth();
   const { toast } = useToast();
@@ -183,7 +185,7 @@ export default function AdminChats() {
   return (
     <div className="space-y-6">
       <h1 className="text-3xl font-bold">Live Chats</h1>
-      <div className="grid lg:grid-cols-3 xl:grid-cols-4 gap-4 h-[680px]">
+      <div className={`grid gap-4 h-[680px] ${copilotOpen ? 'lg:grid-cols-3 xl:grid-cols-4' : 'lg:grid-cols-3'}`}>
 
         {/* Conversations List */}
         <div className="bg-card rounded-xl border border-border overflow-hidden flex flex-col">
@@ -245,6 +247,16 @@ export default function AdminChats() {
                   <Badge variant={selectedConversation.handled_by === 'agent' ? 'default' : 'secondary'} className="text-xs">
                     {selectedConversation.handled_by === 'agent' ? '👤 Agent' : '🤖 Bot'}
                   </Badge>
+                  <Button
+                    variant={copilotOpen ? 'default' : 'outline'}
+                    size="sm"
+                    className="h-7 text-xs gap-1"
+                    onClick={() => setCopilotOpen(o => !o)}
+                    title="Toggle Co-Pilot"
+                  >
+                    <PanelRight className="h-3 w-3" />
+                    <span className="hidden sm:inline">Co-Pilot</span>
+                  </Button>
                   {selectedConversation.status === 'open' && (
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
@@ -308,7 +320,8 @@ export default function AdminChats() {
         </div>
 
         {/* Agent Co-Pilot Panel */}
-        <div className="hidden xl:flex flex-col bg-card rounded-xl border border-border overflow-hidden">
+        {copilotOpen && (
+        <div className="hidden lg:flex flex-col bg-card rounded-xl border border-border overflow-hidden">
           <div className="p-4 border-b border-border flex items-center gap-2">
             <Sparkles className="h-4 w-4 text-primary" />
             <h2 className="font-semibold text-sm">Agent Co-Pilot</h2>
@@ -399,6 +412,7 @@ export default function AdminChats() {
             </div>
           )}
         </div>
+        )}
 
       </div>
     </div>
