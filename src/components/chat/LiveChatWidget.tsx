@@ -219,7 +219,7 @@ export function LiveChatWidget() {
     <>
       <button
         onClick={() => setIsOpen(true)}
-        className="fixed bottom-20 right-3 z-50 flex h-11 w-11 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-lg hover:bg-primary/90 transition-colors md:bottom-24 md:right-6"
+        className="fixed bottom-[8rem] right-3 z-50 flex h-11 w-11 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-lg hover:bg-primary/90 transition-colors md:bottom-36 md:right-6"
         aria-label="Open live chat"
       >
         <MessageCircle className="h-5 w-5" />
