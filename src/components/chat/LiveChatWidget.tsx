@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { MessageCircle, X, Send, Loader2, Bot, User } from 'lucide-react';
+import { MessageCircle, X, Send, Loader2, Bot, User, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -18,9 +18,9 @@ interface ChatMessage {
 }
 
 const CANNED = {
-  greeting: "Hi — welcome to Almans! I'm Al-Assistant 🤖. I can help with order status, returns, and product info. What can I help you with today? (Type \"human\" to talk to an agent.)",
-  transfer: "I'm transferring you to a human specialist now — they'll review this chat and reply here shortly.",
-  notFound: "I couldn't locate an order with that number. Please double-check and try again, or type \"human\" for live help.",
+  greeting: "Hi! Welcome to Almans 👋 I'm Almans Assistant, your AI support. I can help you with orders, products, shipping, returns, and more. What can I help you with today?\n\n(Type \"human\" anytime to talk to a real agent.)",
+  transfer: "I'm connecting you with a human agent now. They'll review your chat and reply shortly. Thank you for your patience!",
+  notFound: "I couldn't find an order with that number. Please double-check and try again, or type \"human\" for live help.",
 };
 
 export function LiveChatWidget() {
@@ -36,7 +36,7 @@ export function LiveChatWidget() {
   const { user } = useAuth();
   const { toast } = useToast();
 
-  // Load existing conversation
+  // Load existing open conversation
   useEffect(() => {
     const loadConversation = async () => {
       if (!user) return;
@@ -58,12 +58,15 @@ export function LiveChatWidget() {
     loadConversation();
   }, [user]);
 
-  // Subscribe to new messages
+  // Subscribe to new messages in real-time
   useEffect(() => {
     if (!conversationId) return;
     const channel = supabase
       .channel(`chat-${conversationId}`)
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chat_messages', filter: `conversation_id=eq.${conversationId}` }, (payload) => {
+      .on('postgres_changes', {
+        event: 'INSERT', schema: 'public', table: 'chat_messages',
+        filter: `conversation_id=eq.${conversationId}`
+      }, (payload) => {
         const newMsg = payload.new as ChatMessage;
         setMessages((prev) => {
           if (prev.some(m => m.id === newMsg.id)) return prev;
@@ -74,13 +77,17 @@ export function LiveChatWidget() {
     return () => { supabase.removeChannel(channel); };
   }, [conversationId]);
 
-  // Auto-scroll
+  // Auto-scroll to latest message
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [messages]);
 
   const loadMessages = async (convId: string) => {
-    const { data } = await supabase.from('chat_messages').select('*').eq('conversation_id', convId).order('created_at', { ascending: true });
+    const { data } = await supabase
+      .from('chat_messages')
+      .select('*')
+      .eq('conversation_id', convId)
+      .order('created_at', { ascending: true });
     if (data) setMessages(data as ChatMessage[]);
   };
 
@@ -116,14 +123,30 @@ export function LiveChatWidget() {
 
       setConversationId(conversation.id);
       setChatStarted(true);
+      setHandedOver(false);
 
-      // Send bot greeting
+      // Send greeting
       await addBotMessage(conversation.id, CANNED.greeting);
       await loadMessages(conversation.id);
     } catch (error) {
       console.error('Error starting chat:', error);
       toast({ title: 'Failed to start chat', variant: 'destructive' });
     }
+  };
+
+  const startNewAIChat = async () => {
+    // Close existing conversation and start fresh
+    if (conversationId) {
+      await supabase.from('chat_conversations')
+        .update({ status: 'closed', updated_at: new Date().toISOString() })
+        .eq('id', conversationId);
+    }
+    setConversationId(null);
+    setMessages([]);
+    setChatStarted(false);
+    setHandedOver(false);
+    // Auto-start new chat
+    await startChat();
   };
 
   const triggerHandover = async (convId: string, reason: string) => {
@@ -143,7 +166,7 @@ export function LiveChatWidget() {
     setNewMessage('');
 
     try {
-      // Insert customer message
+      // Save customer message to DB first
       const { error } = await supabase.from('chat_messages').insert({
         conversation_id: conversationId,
         sender_type: 'customer',
@@ -152,24 +175,26 @@ export function LiveChatWidget() {
       });
       if (error) throw error;
 
-      // If already handed over, no AI needed
+      // If already handed over to agent, no AI needed
       if (handedOver) { setSending(false); return; }
 
-      // AI triage
       setAiProcessing(true);
 
-      // Get last 10 messages for transcript
-      const transcript = messages.slice(-10).map(m => ({
-        role: m.sender_type === 'customer' ? 'user' : 'assistant',
-        content: m.message,
-      }));
-
+      // Call AI triage — edge function fetches its own history from DB
       const { data, error: fnError } = await supabase.functions.invoke('chat-triage', {
-        body: { conversation_id: conversationId, message: msgText, transcript },
+        body: { conversation_id: conversationId, message: msgText },
       });
 
-      if (fnError || !data) {
-        console.error('Triage error:', fnError);
+      if (fnError) {
+        console.error('Triage function error:', fnError);
+        await addBotMessage(conversationId, "Sorry, I'm having trouble right now. Please try again or type 'human' to speak with an agent.");
+        setAiProcessing(false);
+        setSending(false);
+        return;
+      }
+
+      if (!data) {
+        await addBotMessage(conversationId, "I didn't receive a response. Please try again.");
         setAiProcessing(false);
         setSending(false);
         return;
@@ -177,10 +202,10 @@ export function LiveChatWidget() {
 
       if (data.handover) {
         await triggerHandover(conversationId, data.escalation_reason || 'escalated');
-      } else {
+      } else if (data.reply) {
         await addBotMessage(conversationId, data.reply);
 
-        // Increment bot turn count; force handover after 3 unresolved turns
+        // Increment bot turn count
         const { data: conv } = await supabase
           .from('chat_conversations')
           .select('bot_turn_count')
@@ -193,9 +218,12 @@ export function LiveChatWidget() {
           updated_at: new Date().toISOString(),
         }).eq('id', conversationId);
 
-        if (newCount >= 4) {
+        // Force handover after 10 unresolved bot turns
+        if (newCount >= 10) {
           await triggerHandover(conversationId, 'bot_limit_reached');
         }
+      } else if (data.error) {
+        await addBotMessage(conversationId, data.reply || "Something went wrong. Please try again or type 'human' to speak with an agent.");
       }
     } catch (error) {
       console.error('Error sending message:', error);
@@ -211,8 +239,18 @@ export function LiveChatWidget() {
   };
 
   const getMsgStyle = (msg: ChatMessage) => {
-    if (msg.sender_type === 'customer') return { bubble: 'bg-primary text-primary-foreground', align: 'flex-row-reverse', avatar: 'bg-primary/20 text-primary', icon: User };
-    return { bubble: 'bg-secondary', align: '', avatar: 'bg-muted text-muted-foreground', icon: Bot };
+    if (msg.sender_type === 'customer') return {
+      bubble: 'bg-primary text-primary-foreground',
+      align: 'flex-row-reverse',
+      avatar: 'bg-primary/20 text-primary',
+      icon: User
+    };
+    return {
+      bubble: 'bg-secondary',
+      align: '',
+      avatar: 'bg-muted text-muted-foreground',
+      icon: Bot
+    };
   };
 
   return (
@@ -244,14 +282,19 @@ export function LiveChatWidget() {
                     <h3 className="font-semibold">Live Chat</h3>
                     {chatStarted && (
                       <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4">
-                        {handedOver ? '👤 Agent' : '🤖 Al-Assistant'}
+                        {handedOver ? '👤 Agent' : '🤖 Almans Assistant'}
                       </Badge>
                     )}
                   </div>
-                  <p className="text-xs opacity-80">{handedOver ? 'Human agent assigned' : 'AI-powered support'}</p>
+                  <p className="text-xs opacity-80">
+                    {handedOver ? 'Human agent assigned' : 'AI-powered support'}
+                  </p>
                 </div>
               </div>
-              <button onClick={() => setIsOpen(false)} className="p-1 hover:bg-primary-foreground/20 rounded-lg transition-colors">
+              <button
+                onClick={() => setIsOpen(false)}
+                className="p-1 hover:bg-primary-foreground/20 rounded-lg transition-colors"
+              >
                 <X className="h-5 w-5" />
               </button>
             </div>
@@ -260,7 +303,7 @@ export function LiveChatWidget() {
               <div className="p-4 space-y-4">
                 <p className="text-sm text-muted-foreground">
                   {user
-                    ? "Chat with our AI assistant. It handles most queries instantly — or escalates to a human if needed."
+                    ? "Chat with Almans Assistant — our AI support. It handles most queries instantly and can connect you to a human agent when needed."
                     : "Please sign in to start a live chat with our support team."
                   }
                 </p>
@@ -303,28 +346,47 @@ export function LiveChatWidget() {
                         </Avatar>
                         <div className="rounded-2xl px-4 py-3 bg-secondary flex items-center gap-2">
                           <Loader2 className="h-3 w-3 animate-spin" />
-                          <span className="text-xs text-muted-foreground">Al-Assistant is typing…</span>
+                          <span className="text-xs text-muted-foreground">Almans Assistant is typing…</span>
                         </div>
                       </div>
                     )}
                   </div>
                 </ScrollArea>
 
-                <div className="p-4 border-t border-border">
+                <div className="p-4 border-t border-border space-y-2">
                   <div className="flex gap-2">
                     <Input
-                      placeholder={handedOver ? 'Message agent…' : 'Ask Al-Assistant…'}
+                      placeholder={handedOver ? 'Message agent…' : 'Ask Almans Assistant…'}
                       value={newMessage}
                       onChange={(e) => setNewMessage(e.target.value)}
                       onKeyPress={handleKeyPress}
                       disabled={sending || aiProcessing}
                     />
-                    <Button size="icon" onClick={sendMessage} disabled={sending || aiProcessing || !newMessage.trim()}>
-                      {(sending || aiProcessing) ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                    <Button
+                      size="icon"
+                      onClick={sendMessage}
+                      disabled={sending || aiProcessing || !newMessage.trim()}
+                    >
+                      {(sending || aiProcessing)
+                        ? <Loader2 className="h-4 w-4 animate-spin" />
+                        : <Send className="h-4 w-4" />
+                      }
                     </Button>
                   </div>
-                  {!handedOver && (
-                    <p className="text-[10px] text-muted-foreground mt-2 text-center">
+
+                  {handedOver ? (
+                    <div className="flex items-center justify-between">
+                      <p className="text-[10px] text-muted-foreground">Connected to a human agent</p>
+                      <button
+                        onClick={startNewAIChat}
+                        className="flex items-center gap-1 text-[10px] text-primary hover:underline font-medium"
+                      >
+                        <RefreshCw className="h-2.5 w-2.5" />
+                        Start new AI chat
+                      </button>
+                    </div>
+                  ) : (
+                    <p className="text-[10px] text-muted-foreground text-center">
                       Type <span className="font-medium">"human"</span> to talk to an agent
                     </p>
                   )}
