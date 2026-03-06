@@ -14,7 +14,9 @@ const HANDOVER_KEYWORDS = [
 const ANGRY_PATTERNS = /\b(wtf|damn|stupid|idiot|useless|terrible|horrible|worst)\b/i;
 const ORDER_REGEX = /(?:order|#)\s?([A-Za-z0-9\-]{4,})/i;
 
-const TRIAGE_SYSTEM_PROMPT = `You are Almans Assistant — the friendly, helpful, and knowledgeable AI support assistant for Almans, a fashion e-commerce brand in Bangladesh.
+const BASE_SYSTEM_PROMPT = `You are Almans Assistant — the friendly, helpful, and knowledgeable AI support assistant for Almans, a fashion e-commerce brand in Bangladesh.
+
+Your name is "Almans Assistant". Always introduce yourself as such if asked.
 
 Your job:
 - Help customers with questions about Almans products, orders, shipping, returns, payments, and anything related to the shop.
@@ -23,52 +25,119 @@ Your job:
 
 About Almans:
 - Fashion brand based in Bangladesh selling clothing, accessories, and apparel.
-- Shipping: Inside Dhaka (2-3 days, 60 BDT), Outside Dhaka (3-7 days, 130 BDT).
+- Shipping: Inside Dhaka (2-3 business days, 60 BDT), Outside Dhaka (3-7 business days, 130 BDT).
 - Returns: Accepted within 7 days for unused/unworn items with original tags.
 - Payment methods: bKash, Nagad, credit/debit card, Cash on Delivery (COD).
 - Products include shirts, t-shirts, pants, trousers, caps, accessories, and more.
 
 Rules:
-1. Only answer questions related to Almans, its products, orders, shipping, returns, and payments.
-2. If the customer asks about something completely unrelated to Almans or shopping (e.g., weather, politics, other topics), politely say: "I'm only able to help with questions about Almans and our products. For other matters, I'd suggest speaking with one of our human agents who may be able to assist further. Type 'human' to connect with an agent."
+1. ONLY answer questions related to Almans, its products, orders, shipping, returns, and payments.
+2. If the customer asks about ANYTHING unrelated to Almans or shopping (e.g., weather, politics, sports, cooking, general knowledge), respond EXACTLY: "I'm sorry, I can only help with questions about Almans products, orders, and services. For other matters, I'd suggest speaking with one of our human agents who may be able to assist further. Type 'human' to connect with an agent."
 3. If the customer explicitly says "human", "talk to agent", "speak to agent", or similar — respond ONLY with: [HANDOVER_REQUIRED] User requested human agent
 4. If the customer seems very frustrated or angry and you cannot resolve their issue — respond ONLY with: [HANDOVER_REQUIRED] Customer needs human assistance
 5. Keep replies concise and friendly — 2-4 sentences maximum for routine queries.
-6. Ask at most one clarifying question per message (e.g., "Could you share your order number?").
+6. Ask at most one clarifying question per message.
 7. Never ask for passwords, full card numbers, or sensitive personal information.
 8. Always suggest talking to a human agent for complex unresolved issues after 2-3 tries.
+9. When discussing products, mention name, price, available sizes/colors, and stock status if available.
 
 Response format: Either a helpful customer reply OR exactly: [HANDOVER_REQUIRED] <brief reason>`;
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { headers: corsHeaders });
 
-  try {
-    const { conversation_id, message } = await req.json();
+  const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+  const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
-    if (!conversation_id || !message) {
-      return new Response(JSON.stringify({ error: 'missing_params' }), {
+  try {
+    const body = await req.json();
+    const { conversation_id, message, type } = body;
+
+    if (!conversation_id) {
+      return new Response(JSON.stringify({ error: 'missing_conversation_id' }), {
         status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
     }
 
-    // Check for immediate handover triggers
+    // Handle greeting request — save greeting message server-side and return
+    if (type === 'greet') {
+      const greetingText = "Hi! Welcome to Almans 👋 I'm Almans Assistant, your AI support. I can help you with orders, products, shipping, returns, and more. What can I help you with today?\n\n(Type \"human\" anytime to talk to a real agent.)";
+      await fetch(`${supabaseUrl}/rest/v1/chat_messages`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${serviceRoleKey}`,
+          'apikey': serviceRoleKey,
+          'Content-Type': 'application/json',
+          'Prefer': 'return=minimal',
+        },
+        body: JSON.stringify({
+          conversation_id,
+          sender_type: 'bot',
+          sender_id: null,
+          message: greetingText,
+        })
+      });
+      return new Response(JSON.stringify({ saved: true, reply: greetingText }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+
+    if (!message) {
+      return new Response(JSON.stringify({ error: 'missing_message' }), {
+        status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+
+    // Check for immediate handover triggers before calling AI
     const lowerMsg = message.toLowerCase();
     const hasHandoverKeyword = HANDOVER_KEYWORDS.some(kw => lowerMsg.includes(kw));
     const hasAngryLanguage = ANGRY_PATTERNS.test(message);
 
     if (hasHandoverKeyword || hasAngryLanguage) {
       const reason = hasHandoverKeyword ? 'user_requested_human' : 'angry_language';
+      const transferMsg = "I'm connecting you with a human agent now. They'll review your chat and reply shortly. Thank you for your patience!";
+
+      // Save transfer message server-side
+      await fetch(`${supabaseUrl}/rest/v1/chat_messages`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${serviceRoleKey}`,
+          'apikey': serviceRoleKey,
+          'Content-Type': 'application/json',
+          'Prefer': 'return=minimal',
+        },
+        body: JSON.stringify({
+          conversation_id,
+          sender_type: 'bot',
+          sender_id: null,
+          message: transferMsg,
+        })
+      });
+
+      // Update conversation to agent
+      await fetch(`${supabaseUrl}/rest/v1/chat_conversations?id=eq.${conversation_id}`, {
+        method: 'PATCH',
+        headers: {
+          'Authorization': `Bearer ${serviceRoleKey}`,
+          'apikey': serviceRoleKey,
+          'Content-Type': 'application/json',
+          'Prefer': 'return=minimal',
+        },
+        body: JSON.stringify({
+          handled_by: 'agent',
+          escalation_reason: reason,
+          updated_at: new Date().toISOString(),
+        })
+      });
+
       return new Response(JSON.stringify({
         handover: true,
         escalation_reason: reason,
+        saved: true,
       }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-    const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-
-    // Fetch full conversation history from DB (reliable, not stale client state)
+    // Fetch full conversation history from DB
     const histResp = await fetch(
       `${supabaseUrl}/rest/v1/chat_messages?conversation_id=eq.${conversation_id}&order=created_at.asc&limit=20`,
       {
@@ -82,7 +151,6 @@ Deno.serve(async (req) => {
     let conversationHistory: Array<{ role: string; content: string }> = [];
     if (histResp.ok) {
       const msgs = await histResp.json();
-      // Map to OpenAI format — exclude the very last message (current one not saved yet)
       conversationHistory = msgs.map((m: { sender_type: string; message: string }) => ({
         role: m.sender_type === 'customer' ? 'user' : 'assistant',
         content: m.message,
@@ -122,12 +190,48 @@ Deno.serve(async (req) => {
       }
     }
 
+    // Fetch active products for knowledge base
+    let productKnowledge = '';
+    try {
+      const prodResp = await fetch(
+        `${supabaseUrl}/rest/v1/products?is_active=eq.true&select=name,price,sale_price,short_description,sizes,colors,stock&limit=60&order=is_featured.desc`,
+        {
+          headers: {
+            'Authorization': `Bearer ${serviceRoleKey}`,
+            'apikey': serviceRoleKey,
+          }
+        }
+      );
+      if (prodResp.ok) {
+        const products = await prodResp.json();
+        if (products && products.length > 0) {
+          const productLines = products.map((p: {
+            name: string; price: number; sale_price?: number;
+            short_description?: string; sizes?: string[]; colors?: string[]; stock: number;
+          }) => {
+            const priceStr = p.sale_price ? `৳${p.sale_price} (sale, was ৳${p.price})` : `৳${p.price}`;
+            const sizesStr = p.sizes?.length ? `Sizes: ${p.sizes.join(', ')}` : '';
+            const colorsStr = p.colors?.length ? `Colors: ${p.colors.join(', ')}` : '';
+            const stockStr = p.stock <= 0 ? 'Out of stock' : p.stock <= 5 ? `Low stock (${p.stock} left)` : 'In stock';
+            const details = [priceStr, sizesStr, colorsStr, stockStr].filter(Boolean).join(' | ');
+            return `- ${p.name}: ${details}${p.short_description ? `. ${p.short_description}` : ''}`;
+          });
+          productKnowledge = `\n\nCurrent Almans Product Catalog:\n${productLines.join('\n')}`;
+        }
+      }
+    } catch (e) {
+      console.error('Failed to fetch products:', e);
+    }
+
+    // Build final system prompt with product knowledge
+    const systemPrompt = BASE_SYSTEM_PROMPT + productKnowledge;
+
     // Build user message with optional order context
     const userContent = orderContext
       ? `${message}\n\n[Order found in system: ${JSON.stringify(orderContext)}]`
       : message;
 
-    // Call Lovable AI Gateway (reliable, no API key management needed)
+    // Call Lovable AI Gateway
     const lovableApiKey = Deno.env.get('LOVABLE_API_KEY');
     if (!lovableApiKey) {
       return new Response(JSON.stringify({ error: 'ai_not_configured' }), {
@@ -142,27 +246,45 @@ Deno.serve(async (req) => {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'google/gemini-3-flash-preview',
+        model: 'google/gemini-2.5-flash',
         messages: [
-          { role: 'system', content: TRIAGE_SYSTEM_PROMPT },
+          { role: 'system', content: systemPrompt },
           ...conversationHistory,
           { role: 'user', content: userContent },
         ],
-        max_tokens: 400,
-        temperature: 0.7,
+        max_tokens: 500,
+        temperature: 0.6,
       })
     });
 
     if (!aiResp.ok) {
       const err = await aiResp.text();
       console.error('AI Gateway error:', aiResp.status, err);
-      if (aiResp.status === 429) {
-        return new Response(JSON.stringify({ error: 'rate_limited', reply: "I'm a bit busy right now, please try again in a moment!" }), {
-          status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
-      }
-      return new Response(JSON.stringify({ error: 'ai_error', reply: "Sorry, I'm having trouble right now. Please try again or type 'human' to speak with an agent." }), {
-        status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+
+      const errorReply = aiResp.status === 429
+        ? "I'm a bit busy right now, please try again in a moment!"
+        : "Sorry, I'm having trouble right now. Please try again or type 'human' to speak with an agent.";
+
+      // Save error message server-side
+      await fetch(`${supabaseUrl}/rest/v1/chat_messages`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${serviceRoleKey}`,
+          'apikey': serviceRoleKey,
+          'Content-Type': 'application/json',
+          'Prefer': 'return=minimal',
+        },
+        body: JSON.stringify({
+          conversation_id,
+          sender_type: 'bot',
+          sender_id: null,
+          message: errorReply,
+        })
+      });
+
+      return new Response(JSON.stringify({ error: 'ai_error', reply: errorReply, saved: true }), {
+        status: aiResp.status === 429 ? 429 : 502,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
     }
 
@@ -170,22 +292,129 @@ Deno.serve(async (req) => {
     const reply: string = aiData.choices?.[0]?.message?.content?.trim() || '';
 
     if (!reply) {
-      return new Response(JSON.stringify({
-        reply: "Sorry, I couldn't generate a response. Please try again or type 'human' to speak with an agent.",
-        handover: false,
-      }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      const fallback = "Sorry, I couldn't generate a response. Please try again or type 'human' to speak with an agent.";
+      await fetch(`${supabaseUrl}/rest/v1/chat_messages`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${serviceRoleKey}`,
+          'apikey': serviceRoleKey,
+          'Content-Type': 'application/json',
+          'Prefer': 'return=minimal',
+        },
+        body: JSON.stringify({
+          conversation_id,
+          sender_type: 'bot',
+          sender_id: null,
+          message: fallback,
+        })
+      });
+      return new Response(JSON.stringify({ reply: fallback, handover: false, saved: true }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
     }
 
     const isHandover = reply.includes('[HANDOVER_REQUIRED]');
-    const escalationSummary = isHandover
-      ? reply.replace('[HANDOVER_REQUIRED]', '').trim()
-      : null;
+
+    if (isHandover) {
+      const escalationSummary = reply.replace('[HANDOVER_REQUIRED]', '').trim();
+      const transferMsg = "I'm connecting you with a human agent now. They'll review your chat and reply shortly. Thank you for your patience!";
+
+      // Save transfer message server-side
+      await fetch(`${supabaseUrl}/rest/v1/chat_messages`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${serviceRoleKey}`,
+          'apikey': serviceRoleKey,
+          'Content-Type': 'application/json',
+          'Prefer': 'return=minimal',
+        },
+        body: JSON.stringify({
+          conversation_id,
+          sender_type: 'bot',
+          sender_id: null,
+          message: transferMsg,
+        })
+      });
+
+      // Update conversation to agent
+      await fetch(`${supabaseUrl}/rest/v1/chat_conversations?id=eq.${conversation_id}`, {
+        method: 'PATCH',
+        headers: {
+          'Authorization': `Bearer ${serviceRoleKey}`,
+          'apikey': serviceRoleKey,
+          'Content-Type': 'application/json',
+          'Prefer': 'return=minimal',
+        },
+        body: JSON.stringify({
+          handled_by: 'agent',
+          escalation_reason: escalationSummary,
+          updated_at: new Date().toISOString(),
+        })
+      });
+
+      return new Response(JSON.stringify({
+        handover: true,
+        escalation_reason: escalationSummary,
+        saved: true,
+      }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
+    // Save bot reply server-side (bypasses RLS via service role)
+    await fetch(`${supabaseUrl}/rest/v1/chat_messages`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${serviceRoleKey}`,
+        'apikey': serviceRoleKey,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=minimal',
+      },
+      body: JSON.stringify({
+        conversation_id,
+        sender_type: 'bot',
+        sender_id: null,
+        message: reply,
+      })
+    });
+
+    // Increment bot_turn_count
+    const convResp = await fetch(
+      `${supabaseUrl}/rest/v1/chat_conversations?id=eq.${conversation_id}&select=bot_turn_count`,
+      {
+        headers: {
+          'Authorization': `Bearer ${serviceRoleKey}`,
+          'apikey': serviceRoleKey,
+        }
+      }
+    );
+    let newCount = 1;
+    if (convResp.ok) {
+      const convData = await convResp.json();
+      newCount = (convData[0]?.bot_turn_count || 0) + 1;
+    }
+
+    const shouldHandover = newCount >= 10;
+
+    await fetch(`${supabaseUrl}/rest/v1/chat_conversations?id=eq.${conversation_id}`, {
+      method: 'PATCH',
+      headers: {
+        'Authorization': `Bearer ${serviceRoleKey}`,
+        'apikey': serviceRoleKey,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=minimal',
+      },
+      body: JSON.stringify({
+        bot_turn_count: newCount,
+        ...(shouldHandover ? { handled_by: 'agent', escalation_reason: 'bot_limit_reached' } : {}),
+        updated_at: new Date().toISOString(),
+      })
+    });
 
     return new Response(JSON.stringify({
-      reply: isHandover ? null : reply,
-      handover: isHandover,
-      escalation_reason: escalationSummary,
+      reply,
+      handover: shouldHandover,
+      escalation_reason: shouldHandover ? 'bot_limit_reached' : null,
       order: orderContext,
+      saved: true,
     }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
   } catch (err) {

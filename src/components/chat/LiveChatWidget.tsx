@@ -17,12 +17,6 @@ interface ChatMessage {
   created_at: string;
 }
 
-const CANNED = {
-  greeting: "Hi! Welcome to Almans 👋 I'm Almans Assistant, your AI support. I can help you with orders, products, shipping, returns, and more. What can I help you with today?\n\n(Type \"human\" anytime to talk to a real agent.)",
-  transfer: "I'm connecting you with a human agent now. They'll review your chat and reply shortly. Thank you for your patience!",
-  notFound: "I couldn't find an order with that number. Please double-check and try again, or type \"human\" for live help.",
-};
-
 export function LiveChatWidget() {
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -72,6 +66,28 @@ export function LiveChatWidget() {
           if (prev.some(m => m.id === newMsg.id)) return prev;
           return [...prev, newMsg];
         });
+        // If we receive a bot/admin message and were AI processing, stop the indicator
+        if (newMsg.sender_type !== 'customer') {
+          setAiProcessing(false);
+        }
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [conversationId]);
+
+  // Also subscribe to conversation changes (to detect agent handover)
+  useEffect(() => {
+    if (!conversationId) return;
+    const channel = supabase
+      .channel(`conv-${conversationId}`)
+      .on('postgres_changes', {
+        event: 'UPDATE', schema: 'public', table: 'chat_conversations',
+        filter: `id=eq.${conversationId}`
+      }, (payload) => {
+        const updated = payload.new as { handled_by: string };
+        if (updated.handled_by === 'agent') {
+          setHandedOver(true);
+        }
       })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
@@ -89,15 +105,6 @@ export function LiveChatWidget() {
       .eq('conversation_id', convId)
       .order('created_at', { ascending: true });
     if (data) setMessages(data as ChatMessage[]);
-  };
-
-  const addBotMessage = async (convId: string, text: string) => {
-    await supabase.from('chat_messages').insert({
-      conversation_id: convId,
-      sender_type: 'admin',
-      sender_id: null,
-      message: text,
-    });
   };
 
   const startChat = async () => {
@@ -125,8 +132,11 @@ export function LiveChatWidget() {
       setChatStarted(true);
       setHandedOver(false);
 
-      // Send greeting
-      await addBotMessage(conversation.id, CANNED.greeting);
+      // Send greeting via edge function (server-side, bypasses RLS)
+      await supabase.functions.invoke('chat-triage', {
+        body: { type: 'greet', conversation_id: conversation.id },
+      });
+
       await loadMessages(conversation.id);
     } catch (error) {
       console.error('Error starting chat:', error);
@@ -135,7 +145,6 @@ export function LiveChatWidget() {
   };
 
   const startNewAIChat = async () => {
-    // Close existing conversation and start fresh
     if (conversationId) {
       await supabase.from('chat_conversations')
         .update({ status: 'closed', updated_at: new Date().toISOString() })
@@ -145,18 +154,7 @@ export function LiveChatWidget() {
     setMessages([]);
     setChatStarted(false);
     setHandedOver(false);
-    // Auto-start new chat
     await startChat();
-  };
-
-  const triggerHandover = async (convId: string, reason: string) => {
-    setHandedOver(true);
-    await supabase.from('chat_conversations').update({
-      handled_by: 'agent',
-      escalation_reason: reason,
-      updated_at: new Date().toISOString(),
-    }).eq('id', convId);
-    await addBotMessage(convId, CANNED.transfer);
   };
 
   const sendMessage = async () => {
@@ -166,7 +164,7 @@ export function LiveChatWidget() {
     setNewMessage('');
 
     try {
-      // Save customer message to DB first
+      // Save customer message to DB
       const { error } = await supabase.from('chat_messages').insert({
         conversation_id: conversationId,
         sender_type: 'customer',
@@ -180,51 +178,26 @@ export function LiveChatWidget() {
 
       setAiProcessing(true);
 
-      // Call AI triage — edge function fetches its own history from DB
+      // Call AI triage — edge function saves bot reply server-side, bypassing RLS
       const { data, error: fnError } = await supabase.functions.invoke('chat-triage', {
         body: { conversation_id: conversationId, message: msgText },
       });
 
       if (fnError) {
         console.error('Triage function error:', fnError);
-        await addBotMessage(conversationId, "Sorry, I'm having trouble right now. Please try again or type 'human' to speak with an agent.");
+        // Edge function will have saved an error message server-side
+        // Realtime subscription will pick it up
         setAiProcessing(false);
         setSending(false);
         return;
       }
 
-      if (!data) {
-        await addBotMessage(conversationId, "I didn't receive a response. Please try again.");
-        setAiProcessing(false);
-        setSending(false);
-        return;
+      if (data?.handover) {
+        setHandedOver(true);
       }
 
-      if (data.handover) {
-        await triggerHandover(conversationId, data.escalation_reason || 'escalated');
-      } else if (data.reply) {
-        await addBotMessage(conversationId, data.reply);
-
-        // Increment bot turn count
-        const { data: conv } = await supabase
-          .from('chat_conversations')
-          .select('bot_turn_count')
-          .eq('id', conversationId)
-          .single();
-
-        const newCount = (conv?.bot_turn_count || 0) + 1;
-        await supabase.from('chat_conversations').update({
-          bot_turn_count: newCount,
-          updated_at: new Date().toISOString(),
-        }).eq('id', conversationId);
-
-        // Force handover after 10 unresolved bot turns
-        if (newCount >= 10) {
-          await triggerHandover(conversationId, 'bot_limit_reached');
-        }
-      } else if (data.error) {
-        await addBotMessage(conversationId, data.reply || "Something went wrong. Please try again or type 'human' to speak with an agent.");
-      }
+      // No client-side bot message saving needed —
+      // edge function saves messages server-side, realtime subscription shows them
     } catch (error) {
       console.error('Error sending message:', error);
       toast({ title: 'Failed to send message', variant: 'destructive' });
@@ -279,10 +252,10 @@ export function LiveChatWidget() {
                 </div>
                 <div>
                   <div className="flex items-center gap-2">
-                    <h3 className="font-semibold">Live Chat</h3>
+                    <h3 className="font-semibold">Almans Assistant</h3>
                     {chatStarted && (
                       <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4">
-                        {handedOver ? '👤 Agent' : '🤖 Almans Assistant'}
+                        {handedOver ? '👤 Agent' : '🤖 AI'}
                       </Badge>
                     )}
                   </div>
@@ -304,7 +277,7 @@ export function LiveChatWidget() {
                 <p className="text-sm text-muted-foreground">
                   {user
                     ? "Chat with Almans Assistant — our AI support. It handles most queries instantly and can connect you to a human agent when needed."
-                    : "Please sign in to start a live chat with our support team."
+                    : "Please sign in to start a chat with Almans Assistant."
                   }
                 </p>
                 <Button onClick={startChat} className="w-full">
