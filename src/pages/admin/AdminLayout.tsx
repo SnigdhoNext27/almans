@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Outlet, useNavigate, NavLink, Link } from 'react-router-dom';
 import { 
   LayoutDashboard, 
@@ -18,7 +18,6 @@ import {
   Mail,
   Bell
 } from 'lucide-react';
-import { useState } from 'react';
 import { useAuth } from '@/lib/auth';
 import { hasPermission, Permission } from '@/lib/permissions';
 import { Button } from '@/components/ui/button';
@@ -26,6 +25,7 @@ import { Badge } from '@/components/ui/badge';
 import { OrdersDropdown } from '@/components/admin/OrdersDropdown';
 import { useOrderNotificationSound } from '@/hooks/useOrderNotificationSound';
 import { WolfLogoIcon } from '@/components/WolfLogoIcon';
+import { supabase } from '@/integrations/supabase/client';
 
 interface NavItem {
   to: string;
@@ -61,11 +61,33 @@ export default function AdminLayout() {
   const { user, isAdmin, loading, signOut, userRole } = useAuth();
   const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [unreadChats, setUnreadChats] = useState(0);
   const { requestPermission } = useOrderNotificationSound();
 
   // Request notification permission on first render
   useEffect(() => {
     requestPermission();
+  }, []);
+
+  // Load and subscribe to unread agent chat count
+  useEffect(() => {
+    const loadUnreadChats = async () => {
+      const { count } = await supabase
+        .from('chat_conversations')
+        .select('*', { count: 'exact', head: true })
+        .eq('status', 'open')
+        .eq('handled_by', 'agent');
+      setUnreadChats(count || 0);
+    };
+    loadUnreadChats();
+
+    const channel = supabase
+      .channel('admin-chat-badge')
+      .on('postgres_changes', {
+        event: '*', schema: 'public', table: 'chat_conversations',
+      }, () => { loadUnreadChats(); })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
   }, []);
 
   // Filter nav items based on user's role permissions
@@ -133,35 +155,47 @@ export default function AdminLayout() {
         </div>
 
         <nav className="relative flex-1 p-4 space-y-1 overflow-y-auto">
-          {navItems.map((item, idx) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              end={item.end}
-              onClick={() => setSidebarOpen(false)}
-              className={({ isActive }) =>
-                `group flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${
-                  isActive
-                    ? 'bg-primary text-primary-foreground shadow-lg shadow-primary/20'
-                    : 'text-muted-foreground hover:bg-secondary hover:text-foreground'
-                }`
-              }
-            >
-              {({ isActive }) => (
-                <>
-                  <div className={`p-1.5 rounded-lg transition-colors ${
-                    isActive ? 'bg-primary-foreground/20' : 'bg-muted/50 group-hover:bg-muted'
-                  }`}>
-                    <item.icon className="h-4 w-4" />
-                  </div>
-                  <span className="font-medium">{item.label}</span>
-                  {isActive && (
-                    <div className="ml-auto w-1.5 h-1.5 bg-primary-foreground rounded-full" />
-                  )}
-                </>
-              )}
-            </NavLink>
-          ))}
+          {navItems.map((item) => {
+            const isChats = item.to === '/admin/chats';
+            return (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                end={item.end}
+                onClick={() => setSidebarOpen(false)}
+                className={({ isActive }) =>
+                  `group flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${
+                    isActive
+                      ? 'bg-primary text-primary-foreground shadow-lg shadow-primary/20'
+                      : 'text-muted-foreground hover:bg-secondary hover:text-foreground'
+                  }`
+                }
+              >
+                {({ isActive }) => (
+                  <>
+                    <div className={`p-1.5 rounded-lg transition-colors ${
+                      isActive ? 'bg-primary-foreground/20' : 'bg-muted/50 group-hover:bg-muted'
+                    }`}>
+                      <item.icon className="h-4 w-4" />
+                    </div>
+                    <span className="font-medium">{item.label}</span>
+                    <div className="ml-auto flex items-center gap-1">
+                      {isChats && unreadChats > 0 && (
+                        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center leading-none ${
+                          isActive ? 'bg-primary-foreground text-primary' : 'bg-destructive text-destructive-foreground'
+                        }`}>
+                          {unreadChats > 99 ? '99+' : unreadChats}
+                        </span>
+                      )}
+                      {isActive && !isChats && (
+                        <div className="w-1.5 h-1.5 bg-primary-foreground rounded-full" />
+                      )}
+                    </div>
+                  </>
+                )}
+              </NavLink>
+            );
+          })}
         </nav>
 
         <div className="relative p-4 border-t border-border/50">
