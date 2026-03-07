@@ -26,11 +26,12 @@ export function LiveChatWidget() {
   const [chatStarted, setChatStarted] = useState(false);
   const [handedOver, setHandedOver] = useState(false);
   const [aiProcessing, setAiProcessing] = useState(false);
+  const [starting, setStarting] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const { user } = useAuth();
   const { toast } = useToast();
 
-  // Load existing open conversation
+  // Load existing open conversation for this user
   useEffect(() => {
     const loadConversation = async () => {
       if (!user) return;
@@ -66,7 +67,6 @@ export function LiveChatWidget() {
           if (prev.some(m => m.id === newMsg.id)) return prev;
           return [...prev, newMsg];
         });
-        // If we receive a bot/admin message and were AI processing, stop the indicator
         if (newMsg.sender_type !== 'customer') {
           setAiProcessing(false);
         }
@@ -75,7 +75,7 @@ export function LiveChatWidget() {
     return () => { supabase.removeChannel(channel); };
   }, [conversationId]);
 
-  // Also subscribe to conversation changes (to detect agent handover)
+  // Subscribe to conversation updates (detect agent handover)
   useEffect(() => {
     if (!conversationId) return;
     const channel = supabase
@@ -85,9 +85,7 @@ export function LiveChatWidget() {
         filter: `id=eq.${conversationId}`
       }, (payload) => {
         const updated = payload.new as { handled_by: string };
-        if (updated.handled_by === 'agent') {
-          setHandedOver(true);
-        }
+        if (updated.handled_by === 'agent') setHandedOver(true);
       })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
@@ -107,49 +105,41 @@ export function LiveChatWidget() {
     if (data) setMessages(data as ChatMessage[]);
   };
 
+  // Start chat — conversation created SERVER-SIDE via edge function (bypasses RLS for all users)
   const startChat = async () => {
     if (!user) {
       toast({ title: 'Please sign in to start a chat', variant: 'destructive' });
       return;
     }
+    setStarting(true);
     try {
-      const { data: conversation, error } = await supabase
-        .from('chat_conversations')
-        .insert({
-          customer_id: user.id,
-          customer_name: user.user_metadata?.full_name || user.email?.split('@')[0] || 'Customer',
-          customer_email: user.email,
-          status: 'open',
-          handled_by: 'bot',
-          bot_turn_count: 0,
-        })
-        .select()
-        .single();
-
-      if (error) throw error;
-
-      setConversationId(conversation.id);
-      setChatStarted(true);
-      setHandedOver(false);
-
-      // Send greeting via edge function (server-side, bypasses RLS)
-      await supabase.functions.invoke('chat-triage', {
-        body: { type: 'greet', conversation_id: conversation.id },
+      const { data, error } = await supabase.functions.invoke('chat-triage', {
+        body: {
+          type: 'start',
+          user_id: user.id,
+          user_name: user.user_metadata?.full_name || user.email?.split('@')[0] || 'Customer',
+          user_email: user.email,
+        },
       });
 
-      await loadMessages(conversation.id);
+      if (error) throw error;
+      if (!data?.conversation_id) throw new Error('No conversation ID returned');
+
+      setConversationId(data.conversation_id);
+      setChatStarted(true);
+      setHandedOver(false);
+      // Load messages (greeting is already saved server-side)
+      await loadMessages(data.conversation_id);
     } catch (error) {
       console.error('Error starting chat:', error);
-      toast({ title: 'Failed to start chat', variant: 'destructive' });
+      toast({ title: 'Failed to start chat. Please try again.', variant: 'destructive' });
+    } finally {
+      setStarting(false);
     }
   };
 
   const startNewAIChat = async () => {
-    if (conversationId) {
-      await supabase.from('chat_conversations')
-        .update({ status: 'closed', updated_at: new Date().toISOString() })
-        .eq('id', conversationId);
-    }
+    // Close old conversation server-side (handled by type:'start' which closes existing open convs)
     setConversationId(null);
     setMessages([]);
     setChatStarted(false);
@@ -164,7 +154,7 @@ export function LiveChatWidget() {
     setNewMessage('');
 
     try {
-      // Save customer message to DB
+      // Save customer message to DB (RLS allows customer to insert their own messages)
       const { error } = await supabase.from('chat_messages').insert({
         conversation_id: conversationId,
         sender_type: 'customer',
@@ -178,26 +168,19 @@ export function LiveChatWidget() {
 
       setAiProcessing(true);
 
-      // Call AI triage — edge function saves bot reply server-side, bypassing RLS
+      // Call AI triage — edge function saves bot reply server-side
       const { data, error: fnError } = await supabase.functions.invoke('chat-triage', {
         body: { conversation_id: conversationId, message: msgText },
       });
 
       if (fnError) {
         console.error('Triage function error:', fnError);
-        // Edge function will have saved an error message server-side
-        // Realtime subscription will pick it up
         setAiProcessing(false);
         setSending(false);
         return;
       }
 
-      if (data?.handover) {
-        setHandedOver(true);
-      }
-
-      // No client-side bot message saving needed —
-      // edge function saves messages server-side, realtime subscription shows them
+      if (data?.handover) setHandedOver(true);
     } catch (error) {
       console.error('Error sending message:', error);
       toast({ title: 'Failed to send message', variant: 'destructive' });
@@ -280,8 +263,10 @@ export function LiveChatWidget() {
                     : "Please sign in to start a chat with Almans Assistant."
                   }
                 </p>
-                <Button onClick={startChat} className="w-full">
-                  {user ? 'Start Chat' : 'Sign In to Chat'}
+                <Button onClick={startChat} className="w-full" disabled={starting}>
+                  {starting ? (
+                    <><Loader2 className="h-4 w-4 animate-spin mr-2" />Starting chat…</>
+                  ) : user ? 'Start Chat' : 'Sign In to Chat'}
                 </Button>
               </div>
             ) : (

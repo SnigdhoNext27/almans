@@ -43,6 +43,35 @@ Rules:
 
 Response format: Either a helpful customer reply OR exactly: [HANDOVER_REQUIRED] <brief reason>`;
 
+const GREETING_TEXT = `Hi! Welcome to Almans 👋 I'm Almans Assistant, your AI support. I can help you with orders, products, shipping, returns, and more. What can I help you with today?\n\n(Type "human" anytime to talk to a real agent.)`;
+
+async function saveMessage(supabaseUrl: string, serviceRoleKey: string, conversationId: string, message: string, senderType = 'bot') {
+  const resp = await fetch(`${supabaseUrl}/rest/v1/chat_messages`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${serviceRoleKey}`,
+      'apikey': serviceRoleKey,
+      'Content-Type': 'application/json',
+      'Prefer': 'return=minimal',
+    },
+    body: JSON.stringify({ conversation_id: conversationId, sender_type: senderType, sender_id: null, message })
+  });
+  return resp.ok;
+}
+
+async function updateConversation(supabaseUrl: string, serviceRoleKey: string, conversationId: string, patch: Record<string, unknown>) {
+  await fetch(`${supabaseUrl}/rest/v1/chat_conversations?id=eq.${conversationId}`, {
+    method: 'PATCH',
+    headers: {
+      'Authorization': `Bearer ${serviceRoleKey}`,
+      'apikey': serviceRoleKey,
+      'Content-Type': 'application/json',
+      'Prefer': 'return=minimal',
+    },
+    body: JSON.stringify({ ...patch, updated_at: new Date().toISOString() })
+  });
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { headers: corsHeaders });
 
@@ -51,34 +80,86 @@ Deno.serve(async (req) => {
 
   try {
     const body = await req.json();
-    const { conversation_id, message, type } = body;
+    const { conversation_id, message, type, user_id, user_name, user_email } = body;
 
-    if (!conversation_id) {
-      return new Response(JSON.stringify({ error: 'missing_conversation_id' }), {
-        status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      });
-    }
+    // ── TYPE: start ── Create conversation + send greeting server-side
+    // This bypasses RLS entirely so ALL authenticated users work reliably
+    if (type === 'start') {
+      if (!user_id) {
+        return new Response(JSON.stringify({ error: 'missing_user_id' }), {
+          status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
 
-    // Handle greeting request — save greeting message server-side and return
-    if (type === 'greet') {
-      const greetingText = "Hi! Welcome to Almans 👋 I'm Almans Assistant, your AI support. I can help you with orders, products, shipping, returns, and more. What can I help you with today?\n\n(Type \"human\" anytime to talk to a real agent.)";
-      await fetch(`${supabaseUrl}/rest/v1/chat_messages`, {
+      // Close any existing open conversation for this user first
+      await fetch(
+        `${supabaseUrl}/rest/v1/chat_conversations?customer_id=eq.${user_id}&status=eq.open`,
+        {
+          method: 'PATCH',
+          headers: {
+            'Authorization': `Bearer ${serviceRoleKey}`,
+            'apikey': serviceRoleKey,
+            'Content-Type': 'application/json',
+            'Prefer': 'return=minimal',
+          },
+          body: JSON.stringify({ status: 'closed', updated_at: new Date().toISOString() })
+        }
+      );
+
+      // Create new conversation server-side (bypasses RLS)
+      const createResp = await fetch(`${supabaseUrl}/rest/v1/chat_conversations`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${serviceRoleKey}`,
           'apikey': serviceRoleKey,
           'Content-Type': 'application/json',
-          'Prefer': 'return=minimal',
+          'Prefer': 'return=representation',
         },
         body: JSON.stringify({
-          conversation_id,
-          sender_type: 'bot',
-          sender_id: null,
-          message: greetingText,
+          customer_id: user_id,
+          customer_name: user_name || 'Customer',
+          customer_email: user_email || null,
+          status: 'open',
+          handled_by: 'bot',
+          bot_turn_count: 0,
         })
       });
-      return new Response(JSON.stringify({ saved: true, reply: greetingText }), {
+
+      if (!createResp.ok) {
+        const err = await createResp.text();
+        console.error('Failed to create conversation:', err);
+        return new Response(JSON.stringify({ error: 'failed_to_create_conversation' }), {
+          status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+
+      const [conv] = await createResp.json();
+      const newConvId = conv.id;
+
+      // Save greeting server-side
+      await saveMessage(supabaseUrl, serviceRoleKey, newConvId, GREETING_TEXT);
+
+      return new Response(JSON.stringify({ conversation_id: newConvId, reply: GREETING_TEXT, saved: true }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+
+    // ── TYPE: greet ── Send greeting to existing conversation (legacy support)
+    if (type === 'greet') {
+      if (!conversation_id) {
+        return new Response(JSON.stringify({ error: 'missing_conversation_id' }), {
+          status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+      await saveMessage(supabaseUrl, serviceRoleKey, conversation_id, GREETING_TEXT);
+      return new Response(JSON.stringify({ saved: true, reply: GREETING_TEXT }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+
+    if (!conversation_id) {
+      return new Response(JSON.stringify({ error: 'missing_conversation_id' }), {
+        status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
     }
 
@@ -96,56 +177,17 @@ Deno.serve(async (req) => {
     if (hasHandoverKeyword || hasAngryLanguage) {
       const reason = hasHandoverKeyword ? 'user_requested_human' : 'angry_language';
       const transferMsg = "I'm connecting you with a human agent now. They'll review your chat and reply shortly. Thank you for your patience!";
-
-      // Save transfer message server-side
-      await fetch(`${supabaseUrl}/rest/v1/chat_messages`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${serviceRoleKey}`,
-          'apikey': serviceRoleKey,
-          'Content-Type': 'application/json',
-          'Prefer': 'return=minimal',
-        },
-        body: JSON.stringify({
-          conversation_id,
-          sender_type: 'bot',
-          sender_id: null,
-          message: transferMsg,
-        })
+      await saveMessage(supabaseUrl, serviceRoleKey, conversation_id, transferMsg);
+      await updateConversation(supabaseUrl, serviceRoleKey, conversation_id, { handled_by: 'agent', escalation_reason: reason });
+      return new Response(JSON.stringify({ handover: true, escalation_reason: reason, saved: true }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
-
-      // Update conversation to agent
-      await fetch(`${supabaseUrl}/rest/v1/chat_conversations?id=eq.${conversation_id}`, {
-        method: 'PATCH',
-        headers: {
-          'Authorization': `Bearer ${serviceRoleKey}`,
-          'apikey': serviceRoleKey,
-          'Content-Type': 'application/json',
-          'Prefer': 'return=minimal',
-        },
-        body: JSON.stringify({
-          handled_by: 'agent',
-          escalation_reason: reason,
-          updated_at: new Date().toISOString(),
-        })
-      });
-
-      return new Response(JSON.stringify({
-        handover: true,
-        escalation_reason: reason,
-        saved: true,
-      }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    // Fetch full conversation history from DB
+    // Fetch full conversation history from DB for context
     const histResp = await fetch(
       `${supabaseUrl}/rest/v1/chat_messages?conversation_id=eq.${conversation_id}&order=created_at.asc&limit=20`,
-      {
-        headers: {
-          'Authorization': `Bearer ${serviceRoleKey}`,
-          'apikey': serviceRoleKey,
-        }
-      }
+      { headers: { 'Authorization': `Bearer ${serviceRoleKey}`, 'apikey': serviceRoleKey } }
     );
 
     let conversationHistory: Array<{ role: string; content: string }> = [];
@@ -158,24 +200,17 @@ Deno.serve(async (req) => {
     }
 
     // Try to detect order ID and fetch order context
-    const orderMatch = message.match(ORDER_REGEX);
     let orderContext = null;
-
+    const orderMatch = message.match(ORDER_REGEX);
     if (orderMatch) {
       const orderNum = orderMatch[1];
       const resp = await fetch(
         `${supabaseUrl}/rest/v1/orders?order_number=ilike.${encodeURIComponent(orderNum)}&select=id,order_number,status,total,tracking_number,created_at,order_items(product_name,quantity,price)&limit=1`,
-        {
-          headers: {
-            'Authorization': `Bearer ${serviceRoleKey}`,
-            'apikey': serviceRoleKey,
-          }
-        }
+        { headers: { 'Authorization': `Bearer ${serviceRoleKey}`, 'apikey': serviceRoleKey } }
       );
-
       if (resp.ok) {
         const orders = await resp.json();
-        if (orders && orders.length > 0) {
+        if (orders?.length > 0) {
           const o = orders[0];
           orderContext = {
             order_number: o.order_number,
@@ -195,16 +230,11 @@ Deno.serve(async (req) => {
     try {
       const prodResp = await fetch(
         `${supabaseUrl}/rest/v1/products?is_active=eq.true&select=name,price,sale_price,short_description,sizes,colors,stock&limit=60&order=is_featured.desc`,
-        {
-          headers: {
-            'Authorization': `Bearer ${serviceRoleKey}`,
-            'apikey': serviceRoleKey,
-          }
-        }
+        { headers: { 'Authorization': `Bearer ${serviceRoleKey}`, 'apikey': serviceRoleKey } }
       );
       if (prodResp.ok) {
         const products = await prodResp.json();
-        if (products && products.length > 0) {
+        if (products?.length > 0) {
           const productLines = products.map((p: {
             name: string; price: number; sale_price?: number;
             short_description?: string; sizes?: string[]; colors?: string[]; stock: number;
@@ -223,10 +253,7 @@ Deno.serve(async (req) => {
       console.error('Failed to fetch products:', e);
     }
 
-    // Build final system prompt with product knowledge
     const systemPrompt = BASE_SYSTEM_PROMPT + productKnowledge;
-
-    // Build user message with optional order context
     const userContent = orderContext
       ? `${message}\n\n[Order found in system: ${JSON.stringify(orderContext)}]`
       : message;
@@ -241,10 +268,7 @@ Deno.serve(async (req) => {
 
     const aiResp = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
       method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${lovableApiKey}`,
-        'Content-Type': 'application/json',
-      },
+      headers: { 'Authorization': `Bearer ${lovableApiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: 'google/gemini-2.5-flash',
         messages: [
@@ -260,28 +284,10 @@ Deno.serve(async (req) => {
     if (!aiResp.ok) {
       const err = await aiResp.text();
       console.error('AI Gateway error:', aiResp.status, err);
-
       const errorReply = aiResp.status === 429
         ? "I'm a bit busy right now, please try again in a moment!"
         : "Sorry, I'm having trouble right now. Please try again or type 'human' to speak with an agent.";
-
-      // Save error message server-side
-      await fetch(`${supabaseUrl}/rest/v1/chat_messages`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${serviceRoleKey}`,
-          'apikey': serviceRoleKey,
-          'Content-Type': 'application/json',
-          'Prefer': 'return=minimal',
-        },
-        body: JSON.stringify({
-          conversation_id,
-          sender_type: 'bot',
-          sender_id: null,
-          message: errorReply,
-        })
-      });
-
+      await saveMessage(supabaseUrl, serviceRoleKey, conversation_id, errorReply);
       return new Response(JSON.stringify({ error: 'ai_error', reply: errorReply, saved: true }), {
         status: aiResp.status === 429 ? 429 : 502,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
@@ -293,21 +299,7 @@ Deno.serve(async (req) => {
 
     if (!reply) {
       const fallback = "Sorry, I couldn't generate a response. Please try again or type 'human' to speak with an agent.";
-      await fetch(`${supabaseUrl}/rest/v1/chat_messages`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${serviceRoleKey}`,
-          'apikey': serviceRoleKey,
-          'Content-Type': 'application/json',
-          'Prefer': 'return=minimal',
-        },
-        body: JSON.stringify({
-          conversation_id,
-          sender_type: 'bot',
-          sender_id: null,
-          message: fallback,
-        })
-      });
+      await saveMessage(supabaseUrl, serviceRoleKey, conversation_id, fallback);
       return new Response(JSON.stringify({ reply: fallback, handover: false, saved: true }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
@@ -318,103 +310,36 @@ Deno.serve(async (req) => {
     if (isHandover) {
       const escalationSummary = reply.replace('[HANDOVER_REQUIRED]', '').trim();
       const transferMsg = "I'm connecting you with a human agent now. They'll review your chat and reply shortly. Thank you for your patience!";
-
-      // Save transfer message server-side
-      await fetch(`${supabaseUrl}/rest/v1/chat_messages`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${serviceRoleKey}`,
-          'apikey': serviceRoleKey,
-          'Content-Type': 'application/json',
-          'Prefer': 'return=minimal',
-        },
-        body: JSON.stringify({
-          conversation_id,
-          sender_type: 'bot',
-          sender_id: null,
-          message: transferMsg,
-        })
+      await saveMessage(supabaseUrl, serviceRoleKey, conversation_id, transferMsg);
+      await updateConversation(supabaseUrl, serviceRoleKey, conversation_id, { handled_by: 'agent', escalation_reason: escalationSummary });
+      return new Response(JSON.stringify({ handover: true, escalation_reason: escalationSummary, saved: true }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
-
-      // Update conversation to agent
-      await fetch(`${supabaseUrl}/rest/v1/chat_conversations?id=eq.${conversation_id}`, {
-        method: 'PATCH',
-        headers: {
-          'Authorization': `Bearer ${serviceRoleKey}`,
-          'apikey': serviceRoleKey,
-          'Content-Type': 'application/json',
-          'Prefer': 'return=minimal',
-        },
-        body: JSON.stringify({
-          handled_by: 'agent',
-          escalation_reason: escalationSummary,
-          updated_at: new Date().toISOString(),
-        })
-      });
-
-      return new Response(JSON.stringify({
-        handover: true,
-        escalation_reason: escalationSummary,
-        saved: true,
-      }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    // Save bot reply server-side (bypasses RLS via service role)
-    await fetch(`${supabaseUrl}/rest/v1/chat_messages`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${serviceRoleKey}`,
-        'apikey': serviceRoleKey,
-        'Content-Type': 'application/json',
-        'Prefer': 'return=minimal',
-      },
-      body: JSON.stringify({
-        conversation_id,
-        sender_type: 'bot',
-        sender_id: null,
-        message: reply,
-      })
-    });
+    // Save bot reply server-side
+    await saveMessage(supabaseUrl, serviceRoleKey, conversation_id, reply);
 
     // Increment bot_turn_count
     const convResp = await fetch(
       `${supabaseUrl}/rest/v1/chat_conversations?id=eq.${conversation_id}&select=bot_turn_count`,
-      {
-        headers: {
-          'Authorization': `Bearer ${serviceRoleKey}`,
-          'apikey': serviceRoleKey,
-        }
-      }
+      { headers: { 'Authorization': `Bearer ${serviceRoleKey}`, 'apikey': serviceRoleKey } }
     );
     let newCount = 1;
     if (convResp.ok) {
       const convData = await convResp.json();
       newCount = (convData[0]?.bot_turn_count || 0) + 1;
     }
-
     const shouldHandover = newCount >= 10;
-
-    await fetch(`${supabaseUrl}/rest/v1/chat_conversations?id=eq.${conversation_id}`, {
-      method: 'PATCH',
-      headers: {
-        'Authorization': `Bearer ${serviceRoleKey}`,
-        'apikey': serviceRoleKey,
-        'Content-Type': 'application/json',
-        'Prefer': 'return=minimal',
-      },
-      body: JSON.stringify({
-        bot_turn_count: newCount,
-        ...(shouldHandover ? { handled_by: 'agent', escalation_reason: 'bot_limit_reached' } : {}),
-        updated_at: new Date().toISOString(),
-      })
+    await updateConversation(supabaseUrl, serviceRoleKey, conversation_id, {
+      bot_turn_count: newCount,
+      ...(shouldHandover ? { handled_by: 'agent', escalation_reason: 'bot_limit_reached' } : {})
     });
 
     return new Response(JSON.stringify({
-      reply,
-      handover: shouldHandover,
+      reply, handover: shouldHandover,
       escalation_reason: shouldHandover ? 'bot_limit_reached' : null,
-      order: orderContext,
-      saved: true,
+      order: orderContext, saved: true,
     }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
   } catch (err) {
@@ -422,8 +347,6 @@ Deno.serve(async (req) => {
     return new Response(JSON.stringify({
       error: 'server_error',
       reply: "Something went wrong. Please try again or type 'human' to speak with an agent."
-    }), {
-      status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-    });
+    }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   }
 });
