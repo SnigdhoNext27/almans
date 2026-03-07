@@ -45,7 +45,7 @@ Response format: Either a helpful customer reply OR exactly: [HANDOVER_REQUIRED]
 
 const GREETING_TEXT = `Hi! Welcome to Almans 👋 I'm Almans Assistant, your AI support. I can help you with orders, products, shipping, returns, and more. What can I help you with today?\n\n(Type "human" anytime to talk to a real agent.)`;
 
-async function saveMessage(supabaseUrl: string, serviceRoleKey: string, conversationId: string, message: string, senderType = 'bot') {
+async function saveMessage(supabaseUrl: string, serviceRoleKey: string, conversationId: string, message: string) {
   const resp = await fetch(`${supabaseUrl}/rest/v1/chat_messages`, {
     method: 'POST',
     headers: {
@@ -54,7 +54,7 @@ async function saveMessage(supabaseUrl: string, serviceRoleKey: string, conversa
       'Content-Type': 'application/json',
       'Prefer': 'return=minimal',
     },
-    body: JSON.stringify({ conversation_id: conversationId, sender_type: senderType, sender_id: null, message })
+    body: JSON.stringify({ conversation_id: conversationId, sender_type: 'bot', sender_id: null, message })
   });
   return resp.ok;
 }
@@ -80,33 +80,63 @@ Deno.serve(async (req) => {
 
   try {
     const body = await req.json();
-    const { conversation_id, message, type, user_id, user_name, user_email } = body;
+    const { conversation_id, message, type, user_id, user_name, user_email, guest_session_id } = body;
 
     // ── TYPE: start ── Create conversation + send greeting server-side
-    // This bypasses RLS entirely so ALL authenticated users work reliably
+    // Works for both authenticated users (user_id provided) and guests (guest_session_id provided)
     if (type === 'start') {
-      if (!user_id) {
-        return new Response(JSON.stringify({ error: 'missing_user_id' }), {
+      const isGuest = !user_id && !!guest_session_id;
+
+      if (!user_id && !guest_session_id) {
+        return new Response(JSON.stringify({ error: 'missing_user_id_or_guest_session_id' }), {
           status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         });
       }
 
-      // Close any existing open conversation for this user first
-      await fetch(
-        `${supabaseUrl}/rest/v1/chat_conversations?customer_id=eq.${user_id}&status=eq.open`,
-        {
-          method: 'PATCH',
-          headers: {
-            'Authorization': `Bearer ${serviceRoleKey}`,
-            'apikey': serviceRoleKey,
-            'Content-Type': 'application/json',
-            'Prefer': 'return=minimal',
-          },
-          body: JSON.stringify({ status: 'closed', updated_at: new Date().toISOString() })
-        }
-      );
+      // Close any existing open conversation for this user/guest
+      if (user_id) {
+        await fetch(
+          `${supabaseUrl}/rest/v1/chat_conversations?customer_id=eq.${user_id}&status=eq.open`,
+          {
+            method: 'PATCH',
+            headers: {
+              'Authorization': `Bearer ${serviceRoleKey}`,
+              'apikey': serviceRoleKey,
+              'Content-Type': 'application/json',
+              'Prefer': 'return=minimal',
+            },
+            body: JSON.stringify({ status: 'closed', updated_at: new Date().toISOString() })
+          }
+        );
+      } else if (guest_session_id) {
+        // Close previous guest conversations with same session
+        await fetch(
+          `${supabaseUrl}/rest/v1/chat_conversations?guest_session_id=eq.${encodeURIComponent(guest_session_id)}&status=eq.open`,
+          {
+            method: 'PATCH',
+            headers: {
+              'Authorization': `Bearer ${serviceRoleKey}`,
+              'apikey': serviceRoleKey,
+              'Content-Type': 'application/json',
+              'Prefer': 'return=minimal',
+            },
+            body: JSON.stringify({ status: 'closed', updated_at: new Date().toISOString() })
+          }
+        );
+      }
 
       // Create new conversation server-side (bypasses RLS)
+      const conversationPayload: Record<string, unknown> = {
+        customer_name: isGuest ? (user_name || 'Guest') : (user_name || 'Customer'),
+        customer_email: user_email || null,
+        status: 'open',
+        handled_by: 'bot',
+        bot_turn_count: 0,
+      };
+
+      if (user_id) conversationPayload.customer_id = user_id;
+      if (guest_session_id) conversationPayload.guest_session_id = guest_session_id;
+
       const createResp = await fetch(`${supabaseUrl}/rest/v1/chat_conversations`, {
         method: 'POST',
         headers: {
@@ -115,14 +145,7 @@ Deno.serve(async (req) => {
           'Content-Type': 'application/json',
           'Prefer': 'return=representation',
         },
-        body: JSON.stringify({
-          customer_id: user_id,
-          customer_name: user_name || 'Customer',
-          customer_email: user_email || null,
-          status: 'open',
-          handled_by: 'bot',
-          bot_turn_count: 0,
-        })
+        body: JSON.stringify(conversationPayload)
       });
 
       if (!createResp.ok) {
@@ -144,7 +167,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    // ── TYPE: greet ── Send greeting to existing conversation (legacy support)
+    // ── TYPE: greet ── Send greeting to existing conversation (legacy)
     if (type === 'greet') {
       if (!conversation_id) {
         return new Response(JSON.stringify({ error: 'missing_conversation_id' }), {
@@ -154,6 +177,49 @@ Deno.serve(async (req) => {
       await saveMessage(supabaseUrl, serviceRoleKey, conversation_id, GREETING_TEXT);
       return new Response(JSON.stringify({ saved: true, reply: GREETING_TEXT }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+
+    // ── TYPE: guest_message ── Save a guest customer message server-side (bypasses RLS)
+    if (type === 'guest_message') {
+      if (!conversation_id || !message) {
+        return new Response(JSON.stringify({ error: 'missing_fields' }), {
+          status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+      // Validate conversation belongs to this guest session
+      if (guest_session_id) {
+        const convResp = await fetch(
+          `${supabaseUrl}/rest/v1/chat_conversations?id=eq.${conversation_id}&guest_session_id=eq.${encodeURIComponent(guest_session_id)}&select=id`,
+          { headers: { 'Authorization': `Bearer ${serviceRoleKey}`, 'apikey': serviceRoleKey } }
+        );
+        if (convResp.ok) {
+          const convData = await convResp.json();
+          if (!convData || convData.length === 0) {
+            return new Response(JSON.stringify({ error: 'unauthorized' }), {
+              status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+            });
+          }
+        }
+      }
+      const msgResp = await fetch(`${supabaseUrl}/rest/v1/chat_messages`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${serviceRoleKey}`,
+          'apikey': serviceRoleKey,
+          'Content-Type': 'application/json',
+          'Prefer': 'return=representation',
+        },
+        body: JSON.stringify({ conversation_id, sender_type: 'customer', sender_id: null, message })
+      });
+      if (msgResp.ok) {
+        const [savedMsg] = await msgResp.json();
+        return new Response(JSON.stringify({ saved: true, message: savedMsg }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+      return new Response(JSON.stringify({ error: 'failed_to_save' }), {
+        status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
     }
 

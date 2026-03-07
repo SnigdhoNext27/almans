@@ -217,6 +217,7 @@ export type Database = {
           customer_id: string | null
           customer_name: string | null
           escalation_reason: string | null
+          guest_session_id: string | null
           handled_by: string
           id: string
           status: string
@@ -229,6 +230,7 @@ export type Database = {
           customer_id?: string | null
           customer_name?: string | null
           escalation_reason?: string | null
+          guest_session_id?: string | null
           handled_by?: string
           id?: string
           status?: string
@@ -241,6 +243,7 @@ export type Database = {
           customer_id?: string | null
           customer_name?: string | null
           escalation_reason?: string | null
+          guest_session_id?: string | null
           handled_by?: string
           id?: string
           status?: string
