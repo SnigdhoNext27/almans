@@ -1,24 +1,25 @@
 import { useState, useEffect, useRef } from 'react';
-import { MessageCircle, Send, Loader2, Clock, Bot, Sparkles, CheckSquare, X, ChevronDown } from 'lucide-react';
+import {
+  MessageCircle, Send, Loader2, Clock, Bot, Sparkles, CheckSquare, X,
+  ChevronDown, ShoppingBag, User, Package, PanelRight, RefreshCw
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Textarea } from '@/components/ui/textarea';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/lib/auth';
 import { useToast } from '@/hooks/use-toast';
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { PanelRight } from 'lucide-react';
 
 interface Conversation {
   id: string;
+  customer_id: string | null;
   customer_name: string | null;
   customer_email: string | null;
   status: string;
@@ -41,6 +42,14 @@ interface CopilotData {
   action_checklist: string[];
 }
 
+interface Order {
+  id: string;
+  order_number: string;
+  status: string;
+  total: number;
+  created_at: string;
+}
+
 const RESOLUTION_TAGS = [
   { value: 'resolved', label: '✅ Resolved' },
   { value: 'escalated', label: '🔺 Escalated' },
@@ -48,6 +57,14 @@ const RESOLUTION_TAGS = [
 ];
 
 const CSAT_MESSAGE = 'Quick feedback: How would you rate this chat today? (1-5)';
+
+const STATUS_COLORS: Record<string, string> = {
+  pending: 'bg-yellow-500/20 text-yellow-700 dark:text-yellow-400',
+  processing: 'bg-blue-500/20 text-blue-700 dark:text-blue-400',
+  shipped: 'bg-purple-500/20 text-purple-700 dark:text-purple-400',
+  delivered: 'bg-green-500/20 text-green-700 dark:text-green-400',
+  cancelled: 'bg-destructive/20 text-destructive',
+};
 
 export default function AdminChats() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -61,6 +78,8 @@ export default function AdminChats() {
   const [checklist, setChecklist] = useState<boolean[]>([]);
   const [closing, setClosing] = useState(false);
   const [copilotOpen, setCopilotOpen] = useState(true);
+  const [customerOrders, setCustomerOrders] = useState<Order[]>([]);
+  const [ordersLoading, setOrdersLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const { user } = useAuth();
   const { toast } = useToast();
@@ -80,7 +99,10 @@ export default function AdminChats() {
     if (!selectedConversation) return;
     const channel = supabase
       .channel(`admin-chat-${selectedConversation.id}`)
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chat_messages', filter: `conversation_id=eq.${selectedConversation.id}` }, (payload) => {
+      .on('postgres_changes', {
+        event: 'INSERT', schema: 'public', table: 'chat_messages',
+        filter: `conversation_id=eq.${selectedConversation.id}`
+      }, (payload) => {
         setMessages((prev) => [...prev, payload.new as ChatMessage]);
       })
       .subscribe();
@@ -92,8 +114,11 @@ export default function AdminChats() {
   }, [messages]);
 
   const fetchConversations = async () => {
-    const { data } = await supabase.from('chat_conversations').select('*').order('updated_at', { ascending: false });
-    if (data) setConversations(data);
+    const { data } = await supabase
+      .from('chat_conversations')
+      .select('*')
+      .order('updated_at', { ascending: false });
+    if (data) setConversations(data as Conversation[]);
     setLoading(false);
   };
 
@@ -101,12 +126,35 @@ export default function AdminChats() {
     setSelectedConversation(conv);
     setCopilot(null);
     setChecklist([]);
-    const { data } = await supabase.from('chat_messages').select('*').eq('conversation_id', conv.id).order('created_at', { ascending: true });
+    setCustomerOrders([]);
+
+    const { data } = await supabase
+      .from('chat_messages')
+      .select('*')
+      .eq('conversation_id', conv.id)
+      .order('created_at', { ascending: true });
+
     if (data) {
       setMessages(data as ChatMessage[]);
-      // Auto-trigger co-pilot when agent picks up
       if (data.length > 0) loadCopilot(conv.id, data as ChatMessage[]);
     }
+
+    // Load customer orders if we have a customer_id
+    if (conv.customer_id) {
+      loadCustomerOrders(conv.customer_id);
+    }
+  };
+
+  const loadCustomerOrders = async (customerId: string) => {
+    setOrdersLoading(true);
+    const { data } = await supabase
+      .from('orders')
+      .select('id, order_number, status, total, created_at')
+      .eq('user_id', customerId)
+      .order('created_at', { ascending: false })
+      .limit(10);
+    if (data) setCustomerOrders(data as Order[]);
+    setOrdersLoading(false);
   };
 
   const loadCopilot = async (convId: string, msgs: ChatMessage[]) => {
@@ -136,7 +184,9 @@ export default function AdminChats() {
         sender_id: user?.id,
         message: newMessage.trim(),
       });
-      await supabase.from('chat_conversations').update({ updated_at: new Date().toISOString() }).eq('id', selectedConversation.id);
+      await supabase.from('chat_conversations')
+        .update({ updated_at: new Date().toISOString() })
+        .eq('id', selectedConversation.id);
       setNewMessage('');
     } catch {
       toast({ title: 'Failed to send message', variant: 'destructive' });
@@ -147,14 +197,12 @@ export default function AdminChats() {
     if (!selectedConversation) return;
     setClosing(true);
     try {
-      // Update conversation status
       await supabase.from('chat_conversations').update({
         status: 'closed',
         escalation_reason: selectedConversation.escalation_reason || tag,
         updated_at: new Date().toISOString(),
       }).eq('id', selectedConversation.id);
 
-      // Send CSAT survey message
       await supabase.from('chat_messages').insert({
         conversation_id: selectedConversation.id,
         sender_type: 'admin',
@@ -180,7 +228,11 @@ export default function AdminChats() {
     return `${Math.floor(diffMs / 86400000)}d ago`;
   };
 
-  if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="h-8 w-8 animate-spin" /></div>;
+  if (loading) return (
+    <div className="flex items-center justify-center h-64">
+      <Loader2 className="h-8 w-8 animate-spin" />
+    </div>
+  );
 
   return (
     <div className="space-y-6">
@@ -207,15 +259,24 @@ export default function AdminChats() {
                   className={`w-full p-4 text-left border-b border-border hover:bg-secondary/50 transition-colors ${selectedConversation?.id === conv.id ? 'bg-secondary' : ''} ${conv.status === 'closed' ? 'opacity-60' : ''}`}
                 >
                   <div className="flex items-center justify-between mb-1">
-                    <span className="font-medium truncate text-sm">{conv.customer_name || 'Guest'}</span>
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      {conv.customer_id ? (
+                        <User className="h-3 w-3 text-primary shrink-0" />
+                      ) : (
+                        <span className="text-[10px] bg-muted text-muted-foreground px-1 rounded shrink-0">Guest</span>
+                      )}
+                      <span className="font-medium truncate text-sm">{conv.customer_name || 'Guest'}</span>
+                    </div>
                     <div className="flex items-center gap-1 shrink-0">
                       <Badge variant={conv.handled_by === 'agent' ? 'default' : 'secondary'} className="text-[10px] px-1.5 py-0 h-4">
                         {conv.handled_by === 'agent' ? '👤' : '🤖'}
                       </Badge>
-                      <Badge variant={conv.status === 'open' ? 'default' : 'outline'} className="text-[10px] px-1.5 py-0 h-4">{conv.status}</Badge>
+                      <Badge variant={conv.status === 'open' ? 'default' : 'outline'} className="text-[10px] px-1.5 py-0 h-4">
+                        {conv.status}
+                      </Badge>
                     </div>
                   </div>
-                  <p className="text-xs text-muted-foreground truncate">{conv.customer_email}</p>
+                  <p className="text-xs text-muted-foreground truncate">{conv.customer_email || 'No email'}</p>
                   {conv.escalation_reason && (
                     <p className="text-xs text-destructive truncate mt-0.5">⚠ {conv.escalation_reason.replace(/_/g, ' ')}</p>
                   )}
@@ -240,8 +301,13 @@ export default function AdminChats() {
               {/* Chat header */}
               <div className="p-3 border-b border-border flex items-center justify-between bg-secondary/30">
                 <div>
-                  <p className="font-semibold text-sm">{selectedConversation.customer_name || 'Guest'}</p>
-                  <p className="text-xs text-muted-foreground">{selectedConversation.customer_email}</p>
+                  <div className="flex items-center gap-2">
+                    <p className="font-semibold text-sm">{selectedConversation.customer_name || 'Guest'}</p>
+                    {!selectedConversation.customer_id && (
+                      <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4">Guest</Badge>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground">{selectedConversation.customer_email || 'No email'}</p>
                 </div>
                 <div className="flex items-center gap-2">
                   <Badge variant={selectedConversation.handled_by === 'agent' ? 'default' : 'secondary'} className="text-xs">
@@ -252,10 +318,10 @@ export default function AdminChats() {
                     size="sm"
                     className="h-7 text-xs gap-1"
                     onClick={() => setCopilotOpen(o => !o)}
-                    title="Toggle Co-Pilot"
+                    title="Toggle Side Panel"
                   >
                     <PanelRight className="h-3 w-3" />
-                    <span className="hidden sm:inline">Co-Pilot</span>
+                    <span className="hidden sm:inline">Panel</span>
                   </Button>
                   {selectedConversation.status === 'open' && (
                     <DropdownMenu>
@@ -287,12 +353,15 @@ export default function AdminChats() {
                     <div key={msg.id} className={`flex gap-2 ${msg.sender_type === 'admin' ? 'flex-row-reverse' : ''}`}>
                       <Avatar className="h-8 w-8 shrink-0">
                         <AvatarFallback className={msg.sender_type === 'admin' ? 'bg-primary text-primary-foreground' : 'bg-secondary'}>
-                          {msg.sender_type === 'admin' ? 'A' : 'C'}
+                          {msg.sender_type === 'admin' ? 'A' : msg.sender_type === 'bot' ? '🤖' : 'C'}
                         </AvatarFallback>
                       </Avatar>
                       <div className={`rounded-2xl px-4 py-2 max-w-[70%] ${msg.sender_type === 'admin' ? 'bg-primary text-primary-foreground' : 'bg-secondary'}`}>
-                        <p className="text-sm">{msg.message}</p>
-                        <p className="text-[10px] opacity-60 mt-1">{new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
+                        <p className="text-sm whitespace-pre-wrap">{msg.message}</p>
+                        <p className="text-[10px] opacity-60 mt-1">
+                          {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          {msg.sender_type === 'bot' && <span className="ml-1">· AI</span>}
+                        </p>
                       </div>
                     </div>
                   ))}
@@ -319,99 +388,210 @@ export default function AdminChats() {
           )}
         </div>
 
-        {/* Agent Co-Pilot Panel */}
+        {/* Side Panel: Co-Pilot + Customer Context */}
         {copilotOpen && (
-        <div className="hidden lg:flex flex-col bg-card rounded-xl border border-border overflow-hidden">
-          <div className="p-4 border-b border-border flex items-center gap-2">
-            <Sparkles className="h-4 w-4 text-primary" />
-            <h2 className="font-semibold text-sm">Agent Co-Pilot</h2>
-          </div>
-
-          {!selectedConversation ? (
-            <div className="flex-1 flex items-center justify-center p-4 text-center text-muted-foreground text-xs">
-              <p>Select a conversation to see AI assistance</p>
-            </div>
-          ) : copilotLoading ? (
-            <div className="flex-1 flex items-center justify-center flex-col gap-2 text-muted-foreground">
-              <Loader2 className="h-6 w-6 animate-spin" />
-              <p className="text-xs">Analysing conversation…</p>
-            </div>
-          ) : copilot ? (
-            <ScrollArea className="flex-1">
-              <div className="p-4 space-y-5">
-                {/* Summary */}
-                <div>
-                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">Summary</p>
-                  <div className="bg-secondary/60 rounded-lg p-3">
-                    <p className="text-xs leading-relaxed">{copilot.summary}</p>
-                  </div>
-                </div>
-
-                {/* Reply Drafts */}
-                <div>
-                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Reply Drafts</p>
-                  <div className="space-y-2">
-                    {copilot.reply_drafts.map((draft, i) => (
-                      <div key={i} className="border border-border rounded-lg overflow-hidden">
-                        <div className="bg-secondary/40 px-3 py-1 flex items-center justify-between">
-                          <span className="text-[10px] font-medium text-muted-foreground">Draft {i + 1}</span>
-                          <button
-                            onClick={() => setNewMessage(draft)}
-                            className="text-[10px] text-primary hover:underline font-medium"
-                          >
-                            Use
-                          </button>
-                        </div>
-                        <Textarea
-                          value={draft}
-                          onChange={() => {}}
-                          className="text-xs border-0 resize-none min-h-0 bg-transparent focus-visible:ring-0 p-3"
-                          rows={3}
-                          readOnly
-                        />
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Action Checklist */}
-                <div>
-                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Action Checklist</p>
-                  <div className="space-y-2">
-                    {copilot.action_checklist.map((item, i) => (
-                      <button
-                        key={i}
-                        onClick={() => setChecklist(prev => { const n = [...prev]; n[i] = !n[i]; return n; })}
-                        className="w-full flex items-start gap-2 text-left group"
-                      >
-                        <CheckSquare className={`h-4 w-4 mt-0.5 shrink-0 transition-colors ${checklist[i] ? 'text-primary' : 'text-muted-foreground/50 group-hover:text-muted-foreground'}`} />
-                        <span className={`text-xs leading-relaxed transition-colors ${checklist[i] ? 'line-through text-muted-foreground' : ''}`}>
-                          {item}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Refresh */}
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="w-full text-xs h-7 gap-1"
-                  onClick={() => loadCopilot(selectedConversation.id, messages)}
-                  disabled={copilotLoading}
-                >
-                  <Bot className="h-3 w-3" />
-                  Refresh Analysis
-                </Button>
+          <div className="hidden lg:flex flex-col bg-card rounded-xl border border-border overflow-hidden">
+            {!selectedConversation ? (
+              <div className="flex-1 flex items-center justify-center p-4 text-center text-muted-foreground text-xs">
+                <p>Select a conversation to see AI assistance and customer info</p>
               </div>
-            </ScrollArea>
-          ) : (
-            <div className="flex-1 flex items-center justify-center p-4 text-center text-muted-foreground text-xs">
-              <p>No messages to analyse yet</p>
-            </div>
-          )}
-        </div>
+            ) : (
+              <Tabs defaultValue="copilot" className="flex flex-col h-full">
+                <div className="border-b border-border px-2 pt-2">
+                  <TabsList className="w-full h-8">
+                    <TabsTrigger value="copilot" className="flex-1 text-xs gap-1">
+                      <Sparkles className="h-3 w-3" />
+                      Co-Pilot
+                    </TabsTrigger>
+                    <TabsTrigger value="customer" className="flex-1 text-xs gap-1">
+                      <User className="h-3 w-3" />
+                      Customer
+                    </TabsTrigger>
+                  </TabsList>
+                </div>
+
+                {/* Co-Pilot Tab */}
+                <TabsContent value="copilot" className="flex-1 overflow-hidden mt-0 data-[state=active]:flex flex-col">
+                  {copilotLoading ? (
+                    <div className="flex-1 flex items-center justify-center flex-col gap-2 text-muted-foreground">
+                      <Loader2 className="h-6 w-6 animate-spin" />
+                      <p className="text-xs">Analysing conversation…</p>
+                    </div>
+                  ) : copilot ? (
+                    <ScrollArea className="flex-1">
+                      <div className="p-4 space-y-5">
+                        {/* Summary */}
+                        <div>
+                          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">Summary</p>
+                          <div className="bg-secondary/60 rounded-lg p-3">
+                            <p className="text-xs leading-relaxed">{copilot.summary}</p>
+                          </div>
+                        </div>
+
+                        {/* Reply Drafts */}
+                        <div>
+                          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Reply Drafts</p>
+                          <div className="space-y-2">
+                            {copilot.reply_drafts.map((draft, i) => (
+                              <div key={i} className="border border-border rounded-lg overflow-hidden">
+                                <div className="bg-secondary/40 px-3 py-1 flex items-center justify-between">
+                                  <span className="text-[10px] font-medium text-muted-foreground">Draft {i + 1}</span>
+                                  <button
+                                    onClick={() => setNewMessage(draft)}
+                                    className="text-[10px] text-primary hover:underline font-medium"
+                                  >
+                                    Use
+                                  </button>
+                                </div>
+                                <Textarea
+                                  value={draft}
+                                  onChange={() => {}}
+                                  className="text-xs border-0 resize-none min-h-0 bg-transparent focus-visible:ring-0 p-3"
+                                  rows={3}
+                                  readOnly
+                                />
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Action Checklist */}
+                        <div>
+                          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Action Checklist</p>
+                          <div className="space-y-2">
+                            {copilot.action_checklist.map((item, i) => (
+                              <button
+                                key={i}
+                                onClick={() => setChecklist(prev => { const n = [...prev]; n[i] = !n[i]; return n; })}
+                                className="w-full flex items-start gap-2 text-left group"
+                              >
+                                <CheckSquare className={`h-4 w-4 mt-0.5 shrink-0 transition-colors ${checklist[i] ? 'text-primary' : 'text-muted-foreground/50 group-hover:text-muted-foreground'}`} />
+                                <span className={`text-xs leading-relaxed transition-colors ${checklist[i] ? 'line-through text-muted-foreground' : ''}`}>
+                                  {item}
+                                </span>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="w-full text-xs h-7 gap-1"
+                          onClick={() => loadCopilot(selectedConversation.id, messages)}
+                          disabled={copilotLoading}
+                        >
+                          <RefreshCw className="h-3 w-3" />
+                          Refresh Analysis
+                        </Button>
+                      </div>
+                    </ScrollArea>
+                  ) : (
+                    <div className="flex-1 flex items-center justify-center p-4 text-center text-muted-foreground text-xs">
+                      <p>No messages to analyse yet</p>
+                    </div>
+                  )}
+                </TabsContent>
+
+                {/* Customer Context Tab */}
+                <TabsContent value="customer" className="flex-1 overflow-hidden mt-0 data-[state=active]:flex flex-col">
+                  <ScrollArea className="flex-1">
+                    <div className="p-4 space-y-4">
+                      {/* Customer Info */}
+                      <div>
+                        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Customer Info</p>
+                        <div className="bg-secondary/60 rounded-lg p-3 space-y-2">
+                          <div className="flex items-center gap-2">
+                            <div className="h-8 w-8 rounded-full bg-primary/20 flex items-center justify-center shrink-0">
+                              <User className="h-4 w-4 text-primary" />
+                            </div>
+                            <div className="min-w-0">
+                              <p className="text-xs font-medium truncate">{selectedConversation.customer_name || 'Guest'}</p>
+                              <p className="text-[10px] text-muted-foreground truncate">{selectedConversation.customer_email || 'No email'}</p>
+                            </div>
+                          </div>
+                          {!selectedConversation.customer_id && (
+                            <div className="flex items-center gap-1.5 mt-1">
+                              <Badge variant="outline" className="text-[10px] px-1.5">Guest User</Badge>
+                              <span className="text-[10px] text-muted-foreground">Not signed in</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Order History */}
+                      <div>
+                        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Order History</p>
+                        {!selectedConversation.customer_id ? (
+                          <div className="bg-secondary/40 rounded-lg p-3 text-center">
+                            <Package className="h-5 w-5 mx-auto mb-1 text-muted-foreground/50" />
+                            <p className="text-[10px] text-muted-foreground">Guest user — no order history available</p>
+                          </div>
+                        ) : ordersLoading ? (
+                          <div className="flex items-center justify-center py-4">
+                            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                          </div>
+                        ) : customerOrders.length === 0 ? (
+                          <div className="bg-secondary/40 rounded-lg p-3 text-center">
+                            <ShoppingBag className="h-5 w-5 mx-auto mb-1 text-muted-foreground/50" />
+                            <p className="text-[10px] text-muted-foreground">No orders found</p>
+                          </div>
+                        ) : (
+                          <div className="space-y-2">
+                            {customerOrders.map((order) => (
+                              <div key={order.id} className="border border-border rounded-lg p-3 space-y-1.5">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-xs font-medium">#{order.order_number}</span>
+                                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${STATUS_COLORS[order.status] || 'bg-muted text-muted-foreground'}`}>
+                                    {order.status}
+                                  </span>
+                                </div>
+                                <div className="flex items-center justify-between text-[10px] text-muted-foreground">
+                                  <span>৳{order.total.toLocaleString()}</span>
+                                  <span>{new Date(order.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' })}</span>
+                                </div>
+                                <button
+                                  onClick={() => setNewMessage(`Regarding order #${order.order_number}: `)}
+                                  className="text-[10px] text-primary hover:underline font-medium"
+                                >
+                                  Reference in reply →
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Conversation Stats */}
+                      <div>
+                        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Conversation</p>
+                        <div className="bg-secondary/60 rounded-lg p-3 space-y-1.5">
+                          <div className="flex justify-between text-xs">
+                            <span className="text-muted-foreground">Started</span>
+                            <span>{new Date(selectedConversation.created_at).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
+                          </div>
+                          <div className="flex justify-between text-xs">
+                            <span className="text-muted-foreground">Handler</span>
+                            <span className="capitalize">{selectedConversation.handled_by}</span>
+                          </div>
+                          {selectedConversation.escalation_reason && (
+                            <div className="flex justify-between text-xs">
+                              <span className="text-muted-foreground">Escalation</span>
+                              <span className="text-destructive capitalize">{selectedConversation.escalation_reason.replace(/_/g, ' ')}</span>
+                            </div>
+                          )}
+                          <div className="flex justify-between text-xs">
+                            <span className="text-muted-foreground">Messages</span>
+                            <span>{messages.length}</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </ScrollArea>
+                </TabsContent>
+              </Tabs>
+            )}
+          </div>
         )}
 
       </div>

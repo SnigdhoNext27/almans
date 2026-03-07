@@ -17,6 +17,17 @@ interface ChatMessage {
   created_at: string;
 }
 
+/** Returns a stable guest session ID from localStorage (created once per browser) */
+function getGuestSessionId(): string {
+  const key = 'almans_guest_session_id';
+  let id = localStorage.getItem(key);
+  if (!id) {
+    id = `guest_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+    localStorage.setItem(key, id);
+  }
+  return id;
+}
+
 export function LiveChatWidget() {
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -31,24 +42,27 @@ export function LiveChatWidget() {
   const { user } = useAuth();
   const { toast } = useToast();
 
-  // Load existing open conversation for this user
+  // Load existing open conversation on mount
   useEffect(() => {
     const loadConversation = async () => {
-      if (!user) return;
-      const { data: conversations } = await supabase
-        .from('chat_conversations')
-        .select('id, handled_by')
-        .eq('customer_id', user.id)
-        .eq('status', 'open')
-        .order('created_at', { ascending: false })
-        .limit(1);
-
-      if (conversations && conversations.length > 0) {
-        setConversationId(conversations[0].id);
-        setChatStarted(true);
-        setHandedOver(conversations[0].handled_by === 'agent');
-        loadMessages(conversations[0].id);
+      if (user) {
+        // Authenticated: look up by customer_id
+        const { data } = await supabase
+          .from('chat_conversations')
+          .select('id, handled_by')
+          .eq('customer_id', user.id)
+          .eq('status', 'open')
+          .order('created_at', { ascending: false })
+          .limit(1);
+        if (data && data.length > 0) {
+          setConversationId(data[0].id);
+          setChatStarted(true);
+          setHandedOver(data[0].handled_by === 'agent');
+          loadMessages(data[0].id);
+        }
       }
+      // Note: Guest conversations are fetched by edge function on start,
+      // we don't need to pre-load since we can't query by guest_session_id via RLS easily
     };
     loadConversation();
   }, [user]);
@@ -67,9 +81,7 @@ export function LiveChatWidget() {
           if (prev.some(m => m.id === newMsg.id)) return prev;
           return [...prev, newMsg];
         });
-        if (newMsg.sender_type !== 'customer') {
-          setAiProcessing(false);
-        }
+        if (newMsg.sender_type !== 'customer') setAiProcessing(false);
       })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
@@ -105,22 +117,23 @@ export function LiveChatWidget() {
     if (data) setMessages(data as ChatMessage[]);
   };
 
-  // Start chat — conversation created SERVER-SIDE via edge function (bypasses RLS for all users)
+  // Start chat — works for both logged-in users AND guests
   const startChat = async () => {
-    if (!user) {
-      toast({ title: 'Please sign in to start a chat', variant: 'destructive' });
-      return;
-    }
     setStarting(true);
     try {
-      const { data, error } = await supabase.functions.invoke('chat-triage', {
-        body: {
-          type: 'start',
-          user_id: user.id,
-          user_name: user.user_metadata?.full_name || user.email?.split('@')[0] || 'Customer',
-          user_email: user.email,
-        },
-      });
+      const payload: Record<string, string> = { type: 'start' };
+
+      if (user) {
+        payload.user_id = user.id;
+        payload.user_name = user.user_metadata?.full_name || user.email?.split('@')[0] || 'Customer';
+        payload.user_email = user.email || '';
+      } else {
+        // Guest: use localStorage session ID
+        payload.guest_session_id = getGuestSessionId();
+        payload.user_name = 'Guest';
+      }
+
+      const { data, error } = await supabase.functions.invoke('chat-triage', { body: payload });
 
       if (error) throw error;
       if (!data?.conversation_id) throw new Error('No conversation ID returned');
@@ -128,7 +141,6 @@ export function LiveChatWidget() {
       setConversationId(data.conversation_id);
       setChatStarted(true);
       setHandedOver(false);
-      // Load messages (greeting is already saved server-side)
       await loadMessages(data.conversation_id);
     } catch (error) {
       console.error('Error starting chat:', error);
@@ -139,7 +151,6 @@ export function LiveChatWidget() {
   };
 
   const startNewAIChat = async () => {
-    // Close old conversation server-side (handled by type:'start' which closes existing open convs)
     setConversationId(null);
     setMessages([]);
     setChatStarted(false);
@@ -148,27 +159,47 @@ export function LiveChatWidget() {
   };
 
   const sendMessage = async () => {
-    if (!newMessage.trim() || !conversationId || !user) return;
+    if (!newMessage.trim() || !conversationId) return;
     const msgText = newMessage.trim();
     setSending(true);
     setNewMessage('');
 
     try {
-      // Save customer message to DB (RLS allows customer to insert their own messages)
-      const { error } = await supabase.from('chat_messages').insert({
-        conversation_id: conversationId,
-        sender_type: 'customer',
-        sender_id: user.id,
-        message: msgText,
-      });
-      if (error) throw error;
+      if (user) {
+        // Authenticated: insert via Supabase client (RLS: sender_id = auth.uid())
+        const { error } = await supabase.from('chat_messages').insert({
+          conversation_id: conversationId,
+          sender_type: 'customer',
+          sender_id: user.id,
+          message: msgText,
+        });
+        if (error) throw error;
+      } else {
+        // Guest: insert via edge function (service role bypasses RLS)
+        // We optimistically add the message to UI first
+        const optimisticMsg: ChatMessage = {
+          id: `temp_${Date.now()}`,
+          sender_type: 'customer',
+          message: msgText,
+          created_at: new Date().toISOString(),
+        };
+        setMessages(prev => [...prev, optimisticMsg]);
 
-      // If already handed over to agent, no AI needed
+        // Save via edge function for guest
+        const { error } = await supabase.functions.invoke('chat-triage', {
+          body: {
+            type: 'guest_message',
+            conversation_id: conversationId,
+            message: msgText,
+            guest_session_id: getGuestSessionId(),
+          },
+        });
+        if (error) throw error;
+      }
+
       if (handedOver) { setSending(false); return; }
-
       setAiProcessing(true);
 
-      // Call AI triage — edge function saves bot reply server-side
       const { data, error: fnError } = await supabase.functions.invoke('chat-triage', {
         body: { conversation_id: conversationId, message: msgText },
       });
@@ -258,16 +289,18 @@ export function LiveChatWidget() {
             {!chatStarted ? (
               <div className="p-4 space-y-4">
                 <p className="text-sm text-muted-foreground">
-                  {user
-                    ? "Chat with Almans Assistant — our AI support. It handles most queries instantly and can connect you to a human agent when needed."
-                    : "Please sign in to start a chat with Almans Assistant."
-                  }
+                  Chat with Almans Assistant — our AI support. It handles most queries instantly and can connect you to a human agent when needed.
                 </p>
                 <Button onClick={startChat} className="w-full" disabled={starting}>
                   {starting ? (
                     <><Loader2 className="h-4 w-4 animate-spin mr-2" />Starting chat…</>
-                  ) : user ? 'Start Chat' : 'Sign In to Chat'}
+                  ) : 'Start Chat'}
                 </Button>
+                {!user && (
+                  <p className="text-[10px] text-muted-foreground text-center">
+                    Chatting as guest · <a href="/auth" className="text-primary hover:underline">Sign in</a> to track your orders
+                  </p>
+                )}
               </div>
             ) : (
               <>
