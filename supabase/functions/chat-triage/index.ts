@@ -180,6 +180,49 @@ Deno.serve(async (req) => {
       });
     }
 
+    // ── TYPE: guest_message ── Save a guest customer message server-side (bypasses RLS)
+    if (type === 'guest_message') {
+      if (!conversation_id || !message) {
+        return new Response(JSON.stringify({ error: 'missing_fields' }), {
+          status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+      // Validate conversation belongs to this guest session
+      if (guest_session_id) {
+        const convResp = await fetch(
+          `${supabaseUrl}/rest/v1/chat_conversations?id=eq.${conversation_id}&guest_session_id=eq.${encodeURIComponent(guest_session_id)}&select=id`,
+          { headers: { 'Authorization': `Bearer ${serviceRoleKey}`, 'apikey': serviceRoleKey } }
+        );
+        if (convResp.ok) {
+          const convData = await convResp.json();
+          if (!convData || convData.length === 0) {
+            return new Response(JSON.stringify({ error: 'unauthorized' }), {
+              status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+            });
+          }
+        }
+      }
+      const msgResp = await fetch(`${supabaseUrl}/rest/v1/chat_messages`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${serviceRoleKey}`,
+          'apikey': serviceRoleKey,
+          'Content-Type': 'application/json',
+          'Prefer': 'return=representation',
+        },
+        body: JSON.stringify({ conversation_id, sender_type: 'customer', sender_id: null, message })
+      });
+      if (msgResp.ok) {
+        const [savedMsg] = await msgResp.json();
+        return new Response(JSON.stringify({ saved: true, message: savedMsg }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+      return new Response(JSON.stringify({ error: 'failed_to_save' }), {
+        status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+
     if (!conversation_id) {
       return new Response(JSON.stringify({ error: 'missing_conversation_id' }), {
         status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
