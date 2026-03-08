@@ -141,7 +141,21 @@ export function LiveChatWidget() {
       setConversationId(data.conversation_id);
       setChatStarted(true);
       setHandedOver(false);
-      await loadMessages(data.conversation_id);
+
+      if (user) {
+        // Authenticated users can query messages directly via RLS
+        await loadMessages(data.conversation_id);
+      } else {
+        // Guests: set greeting directly from the edge function response (client RLS can't read back)
+        if (data.reply) {
+          setMessages([{
+            id: `greeting_${data.conversation_id}`,
+            sender_type: 'bot',
+            message: data.reply,
+            created_at: new Date().toISOString(),
+          }]);
+        }
+      }
     } catch (error) {
       console.error('Error starting chat:', error);
       toast({ title: 'Failed to start chat. Please try again.', variant: 'destructive' });
@@ -206,7 +220,27 @@ export function LiveChatWidget() {
         return;
       }
 
-      if (data?.handover) setHandedOver(true);
+      if (data?.handover) {
+        setHandedOver(true);
+      }
+
+      if (data?.reply) {
+        // Always add bot reply directly from response — realtime is a bonus but not relied upon
+        setMessages(prev => {
+          // Remove optimistic temp message
+          const withoutTemp = prev.filter(m => !m.id.startsWith('temp_'));
+          // Add confirmed customer message (dedup by message text + sender)
+          const alreadyHasCustomer = withoutTemp.some(m => m.sender_type === 'customer' && m.message === msgText);
+          const confirmed: ChatMessage[] = alreadyHasCustomer ? withoutTemp : [
+            ...withoutTemp,
+            { id: `cust_${Date.now()}`, sender_type: 'customer', message: msgText, created_at: new Date().toISOString() }
+          ];
+          // Add bot reply (dedup by message text)
+          const alreadyHasReply = confirmed.some(m => m.message === data.reply);
+          if (alreadyHasReply) return confirmed;
+          return [...confirmed, { id: `bot_${Date.now() + 1}`, sender_type: 'bot', message: data.reply, created_at: new Date().toISOString() }];
+        });
+      }
     } catch (error) {
       console.error('Error sending message:', error);
       toast({ title: 'Failed to send message', variant: 'destructive' });
