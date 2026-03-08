@@ -141,7 +141,21 @@ export function LiveChatWidget() {
       setConversationId(data.conversation_id);
       setChatStarted(true);
       setHandedOver(false);
-      await loadMessages(data.conversation_id);
+
+      if (user) {
+        // Authenticated users can query messages directly via RLS
+        await loadMessages(data.conversation_id);
+      } else {
+        // Guests: set greeting directly from the edge function response (client RLS can't read back)
+        if (data.reply) {
+          setMessages([{
+            id: `greeting_${data.conversation_id}`,
+            sender_type: 'bot',
+            message: data.reply,
+            created_at: new Date().toISOString(),
+          }]);
+        }
+      }
     } catch (error) {
       console.error('Error starting chat:', error);
       toast({ title: 'Failed to start chat. Please try again.', variant: 'destructive' });
