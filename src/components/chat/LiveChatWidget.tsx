@@ -164,50 +164,45 @@ export function LiveChatWidget() {
     setSending(true);
     setNewMessage('');
 
-    try {
-      if (user) {
-        // Authenticated: insert via Supabase client (RLS: sender_id = auth.uid())
-        const { error } = await supabase.from('chat_messages').insert({
-          conversation_id: conversationId,
-          sender_type: 'customer',
-          sender_id: user.id,
-          message: msgText,
-        });
-        if (error) throw error;
-      } else {
-        // Guest: insert via edge function (service role bypasses RLS)
-        // We optimistically add the message to UI first
-        const optimisticMsg: ChatMessage = {
-          id: `temp_${Date.now()}`,
-          sender_type: 'customer',
-          message: msgText,
-          created_at: new Date().toISOString(),
-        };
-        setMessages(prev => [...prev, optimisticMsg]);
+    // Optimistically show the customer message immediately
+    const optimisticId = `temp_${Date.now()}`;
+    const optimisticMsg: ChatMessage = {
+      id: optimisticId,
+      sender_type: 'customer',
+      message: msgText,
+      created_at: new Date().toISOString(),
+    };
+    setMessages(prev => [...prev, optimisticMsg]);
 
-        // Save via edge function for guest
-        const { error } = await supabase.functions.invoke('chat-triage', {
-          body: {
-            type: 'guest_message',
-            conversation_id: conversationId,
-            message: msgText,
-            guest_session_id: getGuestSessionId(),
-          },
-        });
-        if (error) throw error;
+    try {
+      // Always route through edge function (service role bypasses RLS for all user types)
+      const payload: Record<string, string> = {
+        type: 'message',
+        conversation_id: conversationId,
+        message: msgText,
+      };
+      if (user) {
+        payload.user_id = user.id;
+      } else {
+        payload.guest_session_id = getGuestSessionId();
       }
 
-      if (handedOver) { setSending(false); return; }
+      if (handedOver) {
+        // For handed-over chats: just save the message, don't call AI
+        await supabase.functions.invoke('chat-triage', {
+          body: { ...payload, type: 'message' },
+        });
+        setSending(false);
+        return;
+      }
+
       setAiProcessing(true);
 
-      const { data, error: fnError } = await supabase.functions.invoke('chat-triage', {
-        body: { conversation_id: conversationId, message: msgText },
-      });
+      const { data, error: fnError } = await supabase.functions.invoke('chat-triage', { body: payload });
 
       if (fnError) {
         console.error('Triage function error:', fnError);
-        setAiProcessing(false);
-        setSending(false);
+        toast({ title: 'Failed to get a reply. Please try again.', variant: 'destructive' });
         return;
       }
 
