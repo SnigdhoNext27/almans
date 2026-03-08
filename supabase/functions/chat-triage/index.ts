@@ -180,17 +180,19 @@ Deno.serve(async (req) => {
       });
     }
 
-    // ── TYPE: guest_message ── Save a guest customer message server-side (bypasses RLS)
-    if (type === 'guest_message') {
+    // ── TYPE: guest_message (legacy) OR type: 'message' ── Save customer message + trigger AI
+    // Handles both authenticated users and guests — service role bypasses RLS for customer message save
+    if (type === 'guest_message' || type === 'message') {
       if (!conversation_id || !message) {
         return new Response(JSON.stringify({ error: 'missing_fields' }), {
           status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         });
       }
-      // Validate conversation belongs to this guest session
+
+      // For guest: validate the conversation belongs to this session
       if (guest_session_id) {
         const convResp = await fetch(
-          `${supabaseUrl}/rest/v1/chat_conversations?id=eq.${conversation_id}&guest_session_id=eq.${encodeURIComponent(guest_session_id)}&select=id`,
+          `${supabaseUrl}/rest/v1/chat_conversations?id=eq.${conversation_id}&guest_session_id=eq.${encodeURIComponent(guest_session_id)}&select=id,handled_by`,
           { headers: { 'Authorization': `Bearer ${serviceRoleKey}`, 'apikey': serviceRoleKey } }
         );
         if (convResp.ok) {
@@ -202,6 +204,30 @@ Deno.serve(async (req) => {
           }
         }
       }
+
+      // For authenticated: validate the conversation belongs to this user
+      if (user_id) {
+        const convResp = await fetch(
+          `${supabaseUrl}/rest/v1/chat_conversations?id=eq.${conversation_id}&customer_id=eq.${user_id}&select=id,handled_by`,
+          { headers: { 'Authorization': `Bearer ${serviceRoleKey}`, 'apikey': serviceRoleKey } }
+        );
+        if (convResp.ok) {
+          const convData = await convResp.json();
+          if (!convData || convData.length === 0) {
+            return new Response(JSON.stringify({ error: 'unauthorized' }), {
+              status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+            });
+          }
+        }
+      }
+
+      // Save customer message server-side (service role bypasses RLS)
+      const senderPayload: Record<string, unknown> = {
+        conversation_id,
+        sender_type: 'customer',
+        sender_id: user_id || null,
+        message
+      };
       const msgResp = await fetch(`${supabaseUrl}/rest/v1/chat_messages`, {
         method: 'POST',
         headers: {
@@ -210,17 +236,27 @@ Deno.serve(async (req) => {
           'Content-Type': 'application/json',
           'Prefer': 'return=representation',
         },
-        body: JSON.stringify({ conversation_id, sender_type: 'customer', sender_id: null, message })
+        body: JSON.stringify(senderPayload)
       });
-      if (msgResp.ok) {
+
+      if (!msgResp.ok) {
+        const errText = await msgResp.text();
+        console.error('Failed to save customer message:', errText);
+        return new Response(JSON.stringify({ error: 'failed_to_save_message' }), {
+          status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+
+      // For legacy guest_message type, just return saved (no AI trigger)
+      if (type === 'guest_message') {
         const [savedMsg] = await msgResp.json();
         return new Response(JSON.stringify({ saved: true, message: savedMsg }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         });
       }
-      return new Response(JSON.stringify({ error: 'failed_to_save' }), {
-        status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      });
+
+      // For type: 'message' — fall through to AI processing below
+      // (conversation_id and message are already set)
     }
 
     if (!conversation_id) {
