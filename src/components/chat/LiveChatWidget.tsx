@@ -220,7 +220,26 @@ export function LiveChatWidget() {
         return;
       }
 
-      if (data?.handover) setHandedOver(true);
+      if (data?.handover) {
+        setHandedOver(true);
+        // Show handover message if not already in messages from realtime
+        if (data.reply) {
+          setMessages(prev => {
+            const exists = prev.some(m => m.message === data.reply);
+            if (exists) return prev;
+            return [...prev, { id: `bot_${Date.now()}`, sender_type: 'bot', message: data.reply, created_at: new Date().toISOString() }];
+          });
+        }
+      } else if (data?.reply && !user) {
+        // For guests: realtime may not work due to RLS, so set reply directly from response
+        setMessages(prev => {
+          // Remove the optimistic temp message and replace with server-confirmed + bot reply
+          const withoutTemp = prev.filter(m => !m.id.startsWith('temp_'));
+          const savedCustomer: ChatMessage = { id: `cust_${Date.now()}`, sender_type: 'customer', message: msgText, created_at: new Date().toISOString() };
+          const botReply: ChatMessage = { id: `bot_${Date.now() + 1}`, sender_type: 'bot', message: data.reply, created_at: new Date().toISOString() };
+          return [...withoutTemp, savedCustomer, botReply];
+        });
+      }
     } catch (error) {
       console.error('Error sending message:', error);
       toast({ title: 'Failed to send message', variant: 'destructive' });
