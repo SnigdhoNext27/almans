@@ -222,22 +222,23 @@ export function LiveChatWidget() {
 
       if (data?.handover) {
         setHandedOver(true);
-        // Show handover message if not already in messages from realtime
-        if (data.reply) {
-          setMessages(prev => {
-            const exists = prev.some(m => m.message === data.reply);
-            if (exists) return prev;
-            return [...prev, { id: `bot_${Date.now()}`, sender_type: 'bot', message: data.reply, created_at: new Date().toISOString() }];
-          });
-        }
-      } else if (data?.reply && !user) {
-        // For guests: realtime may not work due to RLS, so set reply directly from response
+      }
+
+      if (data?.reply) {
+        // Always add bot reply directly from response — realtime is a bonus but not relied upon
         setMessages(prev => {
-          // Remove the optimistic temp message and replace with server-confirmed + bot reply
+          // Remove optimistic temp message
           const withoutTemp = prev.filter(m => !m.id.startsWith('temp_'));
-          const savedCustomer: ChatMessage = { id: `cust_${Date.now()}`, sender_type: 'customer', message: msgText, created_at: new Date().toISOString() };
-          const botReply: ChatMessage = { id: `bot_${Date.now() + 1}`, sender_type: 'bot', message: data.reply, created_at: new Date().toISOString() };
-          return [...withoutTemp, savedCustomer, botReply];
+          // Add confirmed customer message (dedup by message text + sender)
+          const alreadyHasCustomer = withoutTemp.some(m => m.sender_type === 'customer' && m.message === msgText);
+          const confirmed: ChatMessage[] = alreadyHasCustomer ? withoutTemp : [
+            ...withoutTemp,
+            { id: `cust_${Date.now()}`, sender_type: 'customer', message: msgText, created_at: new Date().toISOString() }
+          ];
+          // Add bot reply (dedup by message text)
+          const alreadyHasReply = confirmed.some(m => m.message === data.reply);
+          if (alreadyHasReply) return confirmed;
+          return [...confirmed, { id: `bot_${Date.now() + 1}`, sender_type: 'bot', message: data.reply, created_at: new Date().toISOString() }];
         });
       }
     } catch (error) {
